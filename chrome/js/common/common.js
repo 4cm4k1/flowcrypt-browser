@@ -116,7 +116,7 @@
       },
     },
     diagnose: {
-      message_pubkeys: giagnose_message_pubkeys,
+      message_pubkeys: diagnose_message_pubkeys,
       keyserver_pubkeys: diagnose_keyserver_pubkeys,
     },
     crypto: {
@@ -1419,7 +1419,7 @@
 
   /* tool.diagnose */
 
-  function giagnose_message_pubkeys(account_email, message) {
+  function diagnose_message_pubkeys(account_email, message) {
     var message_key_ids = message.getEncryptionKeyIds();
     var local_key_ids = crypto_key_ids(storage.keys_get(account_email, 'primary').public);
     var diagnosis = { found_match: false, receivers: message_key_ids.length };
@@ -2247,7 +2247,11 @@
       auth_request.tab_id = tab_id;
       storage.get(auth_request.account_email, ['google_token_access', 'google_token_expires', 'google_token_refresh', 'google_token_scopes'], function (s) {
         if (typeof s.google_token_access === 'undefined' || typeof s.google_token_refresh === 'undefined' || api_google_has_new_scope(auth_request.scopes, s.google_token_scopes, auth_request.omit_read_scope)) {
-          google_auth_window_show_and_respond_to_auth_request(auth_request, s.google_token_scopes, respond);
+          if(!env_is_background_script()) {
+            google_auth_window_show_and_respond_to_auth_request(auth_request, s.google_token_scopes, respond);
+          } else {
+            respond({success: false, error: 'Cannot produce auth window from background script'});
+          }
         } else {
           google_auth_refresh_token(s.google_token_refresh, function (success, result) {
             if (!success && result === tool.api.error.network) {
@@ -2256,8 +2260,10 @@
               google_auth_save_tokens(auth_request.account_email, result, s.google_token_scopes, function () {
                 respond({ success: true, message_id: auth_request.message_id, account_email: auth_request.account_email }); //todo: email should be tested first with google_auth_check_email?
               });
-            } else {
+            } else if(!env_is_background_script()) {
               google_auth_window_show_and_respond_to_auth_request(auth_request, s.google_token_scopes, respond);
+            } else {
+              respond({success: false, error: 'Cannot show auth window from background script'});
             }
           });
         }
