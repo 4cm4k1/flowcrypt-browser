@@ -277,7 +277,14 @@ export const defineDecryptTests = (testVariant: TestVariant, testWithBrowser: Te
       const settingsPage = await browser.newPage(t, TestUrls.extensionSettings());
       await SettingsPageRecipe.forgetAllPassPhrasesInStorage(settingsPage, pp);
       // requires pp entry
-      await InboxPageRecipe.checkDecryptMsg(t, browser, { acctEmail, threadId, expectedContent, enterPp: Config.key('flowcrypt.compatibility.1pp1').passphrase });
+      await InboxPageRecipe.checkDecryptMsg(t, browser, {
+        acctEmail, threadId, expectedContent,
+        enterPp: {
+          passphrase: Config.key('flowcrypt.compatibility.1pp1').passphrase,
+          isForgetPpChecked: true,
+          isForgetPpDisabled: false
+        }
+      });
       // now remembers pp in session
       await InboxPageRecipe.checkDecryptMsg(t, browser, { acctEmail, threadId, expectedContent });
       // Finish session and check if it's finished
@@ -308,7 +315,7 @@ export const defineDecryptTests = (testVariant: TestVariant, testWithBrowser: Te
 
     ava.default('decrypt - thunderbird - signing key is rendered in signed and encrypted message', testWithBrowser('ci.tests.gmail', async (t, browser) => {
       const threadId = '175adb163ac0d69b';
-      const acctEmail = 'ci.tests.gmail@flowcrypt.dev';
+      const acctEmail = 'ci.tests.gmail@flowcrypt.test';
       const inboxPage = await browser.newPage(t, TestUrls.extension(`chrome/settings/inbox/inbox.htm?acctEmail=${acctEmail}&threadId=${threadId}`));
       await inboxPage.waitAll('iframe');
       const pgpBlock = await inboxPage.getFrame(['pgp_block.htm']);
@@ -329,9 +336,21 @@ export const defineDecryptTests = (testVariant: TestVariant, testWithBrowser: Te
       await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, { params: url, content: ['1234'], signature });
     }));
 
+    ava.default('decrypt - unsigned encrypted message', testWithBrowser('compatibility', async (t, browser) => {
+      const threadId = '17918a9d7ca2fbac';
+      const acctEmail = 'flowcrypt.compatibility@gmail.com';
+      const inboxPage = await browser.newPage(t, TestUrls.extension(`chrome/settings/inbox/inbox.htm?acctEmail=${acctEmail}&threadId=${threadId}`));
+      await inboxPage.waitAll('iframe', { timeout: 2 });
+      const urls = await inboxPage.getFramesUrls(['/chrome/elements/pgp_block.htm'], { sleep: 3 });
+      expect(urls.length).to.equal(1);
+      const url = urls[0].split('/chrome/elements/pgp_block.htm')[1];
+      const signature = ['Message Not Signed'];
+      await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, { params: url, content: ['This is unsigned, encrypted message'], signature });
+    }));
+
     ava.default('signature - sender is different from pubkey email', testWithBrowser('ci.tests.gmail', async (t, browser) => {
       const threadId = '1766644f13510f58';
-      const acctEmail = 'ci.tests.gmail@flowcrypt.dev';
+      const acctEmail = 'ci.tests.gmail@flowcrypt.test';
       const inboxPage = await browser.newPage(t, TestUrls.extension(`chrome/settings/inbox/inbox.htm?acctEmail=${acctEmail}&threadId=${threadId}`));
       await inboxPage.waitAll('iframe', { timeout: 2 });
       const urls = await inboxPage.getFramesUrls(['/chrome/elements/pgp_block.htm'], { sleep: 10, appearIn: 20 });
@@ -373,22 +392,12 @@ export const defineDecryptTests = (testVariant: TestVariant, testWithBrowser: Te
       await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
         params,
         content: ["1234"],
-        signature: ["Fetched pubkey, click to verify"]
-      });
-      await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
-        params,
-        content: ["1234"],
         signature: ["matching signature", "Flowcrypt.Compatibility@Protonmail.Com"]
       });
     }));
 
     ava.default('decrypt - verify encrypted+signed message', testWithBrowser('compatibility', async (t, browser) => {
       const params = `?frameId=none&message=&msgId=1617429dc55600db&senderEmail=martin%40politick.ca&isOutgoing=___cu_false___&acctEmail=flowcrypt.compatibility%40gmail.com`; // eslint-disable-line max-len
-      await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
-        params,
-        content: ['4) signed + encrypted email if supported'],
-        signature: ["Fetched pubkey, click to verify"]
-      });
       await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
         params,
         content: ['4) signed + encrypted email if supported'],
@@ -479,6 +488,14 @@ export const defineDecryptTests = (testVariant: TestVariant, testWithBrowser: Te
       await pgpBlockPage.waitForContent('@container-err-text', 'API path traversal forbidden');
     }));
 
+    ava.default(`decrypt - try path traversal forward slash workaround`, testWithBrowser('compatibility', async (t, browser) => {
+      const params = "?frame_id=frame_TWloVRhvZE&message=&message_id=..\\test&senderEmail=sender%40email.com&is_outgoing=___cu_false___&account_email=flowcrypt.compatibility%40gmail.com";
+      const pgpHostPage = await browser.newPage(t, `chrome/dev/ci_pgp_host_page.htm${params}`);
+      const pgpBlockPage = await pgpHostPage.getFrame(['pgp_block.htm']);
+      await pgpBlockPage.waitForSelTestState('ready', 5);
+      await pgpBlockPage.waitForContent('@container-err-text', 'API path traversal forbidden');
+    }));
+
     ava.default(`verify - sha1 shows error`, testWithBrowser('compatibility', async (t, browser) => {
       const msg = `-----BEGIN PGP MESSAGE-----
 
@@ -492,11 +509,6 @@ d6Z36//MsmczN00Wd60t9T+qyLz0T4/UG2Y9lgf367f3d+kYPE0LS7mXuFmjlPXfw0nKyVsSeFiu
 =Ruyn
 -----END PGP MESSAGE-----`;
       const params = `?frame_id=frame_TWloVRhvZE&message=${encodeURIComponent(msg)}&message_id=none&senderEmail=sha1%40sign.com&is_outgoing=___cu_false___&account_email=flowcrypt.compatibility%40gmail.com`;
-      await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
-        params,
-        content: ['test'],
-        signature: ["Fetched pubkey, click to verify"]
-      });
       await BrowserRecipe.pgpBlockVerifyDecryptedContent(t, browser, {
         params,
         content: ['test'],

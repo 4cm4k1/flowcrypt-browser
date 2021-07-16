@@ -13,8 +13,7 @@ import { ViewModule } from '../../../js/common/view-module.js';
 import { ComposeView } from '../compose.js';
 import { KeyStore } from '../../../js/common/platform/store/key-store.js';
 import { AcctStore } from '../../../js/common/platform/store/acct-store.js';
-import { GlobalStore } from '../../../js/common/platform/store/global-store.js';
-import { ContactStore } from '../../../js/common/platform/store/contact-store.js';
+import { ContactStore, ContactUpdate } from '../../../js/common/platform/store/contact-store.js';
 import { PassphraseStore } from '../../../js/common/platform/store/passphrase-store.js';
 import { Settings } from '../../../js/common/settings.js';
 import { Ui } from '../../../js/common/browser/ui.js';
@@ -22,7 +21,6 @@ import { Ui } from '../../../js/common/browser/ui.js';
 export class ComposeStorageModule extends ViewModule<ComposeView> {
 
   private passphraseInterval: number | undefined;
-  private ksLookupsByEmail: { [key: string]: Key } = {};
 
   public setHandlers = () => {
     BrowserMsg.addListener('passphrase_entry', async ({ entered }: Bm.PassphraseEntry) => {
@@ -55,28 +53,25 @@ export class ComposeStorageModule extends ViewModule<ComposeView> {
     await AcctStore.set(this.view.acctEmail, { drafts_reply: drafts });
   }
 
-  public addAdminCodes = async (shortId: string, codes: string[]) => {
-    const adminCodeStorage = await GlobalStore.get(['admin_codes']);
-    adminCodeStorage.admin_codes = adminCodeStorage.admin_codes || {};
-    adminCodeStorage.admin_codes[shortId] = { date: Date.now(), codes };
-    await GlobalStore.set(adminCodeStorage);
-  }
-
   public collectAllAvailablePublicKeys = async (senderEmail: string, senderKi: KeyInfo, recipients: string[]): Promise<CollectPubkeysResult> => {
-    const contacts = await ContactStore.get(undefined, recipients);
-    const armoredPubkeys = [{ pubkey: await KeyUtil.parse(senderKi.public), email: senderEmail, isMine: true }];
+    const contacts = await ContactStore.getEncryptionKeys(undefined, recipients);
+    const pubkeys = [{ pubkey: await KeyUtil.parse(senderKi.public), email: senderEmail, isMine: true }];
     const emailsWithoutPubkeys = [];
-    for (const i of contacts.keys()) {
-      const contact = contacts[i];
-      if (contact && contact.hasPgp && contact.pubkey) {
-        armoredPubkeys.push({ pubkey: contact.pubkey, email: contact.email, isMine: false });
-      } else if (contact && this.ksLookupsByEmail[contact.email]) {
-        armoredPubkeys.push({ pubkey: this.ksLookupsByEmail[contact.email], email: contact.email, isMine: false });
+    for (const contact of contacts) {
+      let keysPerEmail = contact.keys;
+      // if non-expired present, return non-expired only
+      if (keysPerEmail.some(k => k.usableForEncryption)) {
+        keysPerEmail = keysPerEmail.filter(k => k.usableForEncryption);
+      }
+      if (keysPerEmail.length) {
+        for (const pubkey of keysPerEmail) {
+          pubkeys.push({ pubkey, email: contact.email, isMine: false });
+        }
       } else {
-        emailsWithoutPubkeys.push(recipients[i]);
+        emailsWithoutPubkeys.push(contact.email);
       }
     }
-    return { armoredPubkeys, emailsWithoutPubkeys };
+    return { pubkeys, emailsWithoutPubkeys };
   }
 
   public passphraseGet = async (senderKi?: KeyInfo) => {
@@ -88,34 +83,50 @@ export class ComposeStorageModule extends ViewModule<ComposeView> {
 
   public lookupPubkeyFromDbOrKeyserverAndUpdateDbIfneeded = async (email: string, name: string | undefined): Promise<Contact | "fail"> => {
     const [storedContact] = await ContactStore.get(undefined, [email]);
-    if (storedContact && storedContact.hasPgp && storedContact.pubkey) {
+    if (storedContact && storedContact.hasPgp && storedContact.pubkey && !storedContact.revoked) {
       // Potentially check if pubkey was updated - async. By the time user finishes composing, newer version would have been updated in db.
       // If sender didn't pull a particular pubkey for a long time and it has since expired, but there actually is a newer version on attester, this may unnecessarily show "bad pubkey",
       //      -> until next time user tries to pull it. This could be fixed by attempting to fix up the rendered recipient inside the async function below.
       this.checkKeyserverForNewerVersionOfKnownPubkeyIfNeeded(storedContact).catch(Catch.reportErr);
       return storedContact;
     }
-    return await this.ksLookupUnknownContactPubAndSaveToDb(email, name);
+    return await this.ksLookupUnknownContactPubAndSaveToDb(email, name, storedContact);
   }
 
-  public ksLookupUnknownContactPubAndSaveToDb = async (email: string, name: string | undefined): Promise<Contact | "fail"> => {
+  public ksLookupUnknownContactPubAndSaveToDb = async (email: string, name: string | undefined, existingContact: Contact | undefined): Promise<Contact | "fail"> => {
     try {
       const lookupResult = await this.view.pubLookup.lookupEmail(email);
       if (lookupResult && email) {
-        if (lookupResult.pubkey) {
-          const key = await KeyUtil.parse(lookupResult.pubkey);
-          if (!key.usableForEncryption && !KeyUtil.expired(key)) { // Not to skip expired keys
+        const pubkeys: Key[] = [];
+        for (const pubkey of lookupResult.pubkeys) {
+          const key = await KeyUtil.parse(pubkey);
+          if (!key.usableForEncryption && !key.revoked && !KeyUtil.expired(key)) { // Not to skip expired and revoked keys
             console.info('Dropping found+parsed key because getEncryptionKeyPacket===null', { for: email, fingerprint: key.id });
             Ui.toast(`Public Key retrieved for email ${email} with id ${key.id} was ignored because it's not usable for encryption.`, 5);
-            lookupResult.pubkey = null; // tslint:disable-line:no-null-keyword
+          } else {
+            pubkeys.push(key);
           }
         }
-        const ksContact = await ContactStore.obj({ email, name, pubkey: lookupResult.pubkey, lastCheck: Date.now() });
-        if (ksContact.pubkey) {
-          this.ksLookupsByEmail[email] = ksContact.pubkey;
+        // save multiple pubkeys as separate operations
+        // todo: add a convenient method to storage?
+        const updates: ContactUpdate[] = [];
+        if (!pubkeys.length) {
+          if (name) {
+            // update just name
+            updates.push({ name } as ContactUpdate);
+          } else {
+            // No public key found. Returning early, nothing to update in local store below.
+            return existingContact ?? await ContactStore.obj({ email });
+          }
         }
-        await ContactStore.save(undefined, ksContact);
-        return ksContact;
+        for (const pubkey of pubkeys) {
+          updates.push({ name, pubkey, pubkeyLastCheck: Date.now() });
+        }
+        if (updates.length) {
+          await Promise.all(updates.map(async (update) => await ContactStore.update(undefined, email, update)));
+        }
+        const [preferred] = await ContactStore.get(undefined, [email]);
+        return preferred ?? PUBKEY_LOOKUP_RESULT_FAIL;
       } else {
         return PUBKEY_LOOKUP_RESULT_FAIL;
       }

@@ -20,9 +20,12 @@ import { defineUnitBrowserTests } from './tests/unit-browser';
 import { mock } from './mock';
 import { mockBackendData } from './mock/backend/backend-endpoints';
 import { TestUrls } from './browser/test-urls';
+import { writeFileSync } from 'fs';
 
 export const { testVariant, testGroup, oneIfNotPooled, buildDir, isMock } = getParsedCliParams();
-export const internalTestState = { expectiIntentionalErrReport: false }; // updated when a particular test that causes an error is run
+export const internalTestState = { expectIntentionalErrReport: false }; // updated when a particular test that causes an error is run
+const DEBUG_BROWSER_LOG = false; // set to true to print / export information from browser
+const DEBUG_MOCK_LOG = false; // se to true to print mock server logs
 
 process.setMaxListeners(60);
 
@@ -32,7 +35,7 @@ const consts = { // higher concurrency can cause 429 google errs when composing
   TIMEOUT_ALL_RETRIES: minutes(13), // this has to suffer waiting for semaphore between retries, thus almost the same as below
   TIMEOUT_OVERALL: minutes(14),
   ATTEMPTS: testGroup === 'STANDARD-GROUP' ? oneIfNotPooled(3) : process.argv.includes('--retry=false') ? 1 : 3,
-  POOL_SIZE: oneIfNotPooled(isMock ? 24 : 2),
+  POOL_SIZE: oneIfNotPooled(isMock ? 20 : 3),
   PROMISE_TIMEOUT_OVERALL: undefined as any as Promise<never>, // will be set right below
   IS_LOCAL_DEBUG: process.argv.includes('--debug') ? true : false, // run locally by developer, not in ci
 };
@@ -51,7 +54,12 @@ ava.before('set config and mock api', async t => {
   Config.extensionId = await browserPool.getExtensionId(t);
   console.info(`Extension url: chrome-extension://${Config.extensionId}`);
   if (isMock) {
-    const mockApi = await mock(line => mockApiLogs.push(line));
+    const mockApi = await mock(line => {
+      if (DEBUG_MOCK_LOG) {
+        console.log(line);
+      }
+      mockApiLogs.push(line);
+    });
     closeMockApi = mockApi.close;
   }
   t.pass();
@@ -60,19 +68,28 @@ ava.before('set config and mock api', async t => {
 const testWithBrowser = (acct: CommonAcct | undefined, cb: (t: AvaContext, browser: BrowserHandle) => Promise<void>, flag?: 'FAILING'): ava.Implementation<{}> => {
   return async (t: AvaContext) => {
     await browserPool.withNewBrowserTimeoutAndRetry(async (t, browser) => {
+      const start = Date.now();
       if (acct) {
         await BrowserRecipe.setUpCommonAcct(t, browser, acct, !isMock);
       }
       await cb(t, browser);
-      try {
-        const page = await browser.newPage(t, TestUrls.extension('chrome/dev/ci_unit_test.htm'));
-        const items = await page.target.evaluate(() => (window as any).Debug.readDatabase());
-        if (items.length > 0) {
-          console.info('debug messages: ', JSON.stringify(items), '\n');
+      if (DEBUG_BROWSER_LOG) {
+        try {
+          const page = await browser.newPage(t, TestUrls.extension('chrome/dev/ci_unit_test.htm'));
+          const items = await page.target.evaluate(() => (window as any).Debug.readDatabase()) as { input: unknown, output: unknown }[];
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const input = JSON.stringify(item.input);
+            const output = JSON.stringify(item.output, undefined, 2);
+            const file = `./test/tmp/${t.title}-${i}.txt`;
+            writeFileSync(file, `in: ${input}\n\nout: ${output}`);
+            t.log(`browser debug written to file: ${file}`);
+          }
+        } catch (e) {
+          t.log(`Error reading debug messages: ${e}`);
         }
-      } catch (e) {
-        console.error(`Error reading debug messages: ${e}`);
       }
+      t.log(`run time: ${Math.ceil((Date.now() - start) / 1000)}s`);
     }, t, consts, flag);
     t.pass();
   };
@@ -104,16 +121,23 @@ ava.after.always('evaluate Catch.reportErr errors', async t => {
   // our S/MIME implementation is still early so it throws "reportable" errors like this during tests
   const usefulErrors = mockBackendData.reportedErrors
     .filter(e => e.message !== 'Too few bytes to read ASN.1 value.')
-    // on enterprise, these report errs
-    .filter(e => !(testVariant === 'ENTERPRISE-MOCK' && e.trace.includes('.well-known/host-meta.json')))
+    // below for test "no.fes@example.com - skip FES on consumer, show friendly message on enterprise"
+    .filter(e => !e.trace.includes('-1 when GET-ing https://fes.example.com'))
     // todo - ideally mock tests would never call this. But we do tests with human@flowcrypt.com so it's calling here
     .filter(e => !e.trace.includes('-1 when GET-ing https://openpgpkey.flowcrypt.com'));
-  // end of todo
   const foundExpectedErr = usefulErrors.find(re => re.message === `intentional error for debugging`);
   const foundUnwantedErrs = usefulErrors.filter(re => re.message !== `intentional error for debugging` && !re.message.includes('traversal forbidden'));
-  if (!foundExpectedErr && internalTestState.expectiIntentionalErrReport) {
-    t.fail(`Catch.reportErr errors: missing intentional error`);
-  } else if (foundUnwantedErrs.length) {
+  if (testVariant === 'CONSUMER-MOCK' && internalTestState.expectIntentionalErrReport && !foundExpectedErr) {
+    // on consumer flavor app, we submit errors to flowcrypt.com backend
+    t.fail(`Catch.reportErr errors: missing intentional error report on consumer flavor`);
+    return;
+  }
+  if (testVariant === 'ENTERPRISE-MOCK' && mockBackendData.reportedErrors.length) {
+    // on enterprise flavor app, we don't submit any errors anywhere yet
+    t.fail(`Catch.reportErr errors: should not report any error on enterprise app`);
+    return;
+  }
+  if (foundUnwantedErrs.length) {
     for (const e of foundUnwantedErrs) {
       console.info(`----- mockBackendData Catch.reportErr -----\nname: ${e.name}\nmessage: ${e.message}\nurl: ${e.url}\ntrace: ${e.trace}`);
     }
@@ -149,7 +173,6 @@ if (testGroup === 'UNIT-TESTS') {
   defineFlakyTests(testVariant, testWithBrowser);
 } else {
   defineSetupTests(testVariant, testWithBrowser);
-  defineUnitNodeTests(testVariant);
   defineComposeTests(testVariant, testWithBrowser);
   defineDecryptTests(testVariant, testWithBrowser);
   defineGmailTests(testVariant, testWithBrowser);

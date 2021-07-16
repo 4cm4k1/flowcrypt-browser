@@ -504,7 +504,7 @@ export class GmailElementReplacer implements WebmailElementReplacer {
 
   private filterAttachments = (potentialMatches: JQueryEl | HTMLElement, regExp: RegExp) => {
     return $(potentialMatches).filter('span.aZo:visible, span.a5r:visible').find('span.aV3').filter(function () {
-      const name = this.innerText.trim();
+      const name = $(this).text().trim();
       return regExp.test(name);
     }).closest('span.aZo, span.a5r');
   }
@@ -693,7 +693,7 @@ export class GmailElementReplacer implements WebmailElementReplacer {
                   const [contact] = await ContactStore.get(undefined, [email]);
                   if (contact && contact.pubkey) {
                     this.recipientHasPgpCache[email] = true;
-                  } else if ((await this.pubLookup.lookupEmail(email)).pubkey) {
+                  } else if ((await this.pubLookup.lookupEmail(email)).pubkeys.length) {
                     this.recipientHasPgpCache[email] = true;
                   } else {
                     this.recipientHasPgpCache[email] = false;

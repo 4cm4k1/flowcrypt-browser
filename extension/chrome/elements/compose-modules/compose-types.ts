@@ -11,6 +11,7 @@ export enum RecipientStatus {
   HAS_PGP,
   NO_PGP,
   EXPIRED,
+  REVOKED,
   WRONG,
   FAILED
 }
@@ -36,7 +37,7 @@ export type MessageToReplyOrForward = {
   decryptedFiles: File[]
 };
 
-export type CollectPubkeysResult = { armoredPubkeys: PubkeyResult[], emailsWithoutPubkeys: string[] };
+export type CollectPubkeysResult = { pubkeys: PubkeyResult[], emailsWithoutPubkeys: string[] };
 
 export type PopoverOpt = 'encrypt' | 'sign' | 'richtext';
 export type PopoverChoices = { [key in PopoverOpt]: boolean };

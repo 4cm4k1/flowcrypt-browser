@@ -8,6 +8,8 @@ import { OauthPageRecipe } from './../page-recipe/oauth-page-recipe';
 import { SetupPageRecipe } from './../page-recipe/setup-page-recipe';
 import { TestUrls } from '../../browser/test-urls';
 import { google } from 'googleapis';
+import { testVariant } from '../../test';
+import { testConstants } from './consts';
 
 export class BrowserRecipe {
 
@@ -33,6 +35,12 @@ export class BrowserRecipe {
     return gmailPage;
   }
 
+  public static openGoogleChatPage = async (t: AvaContext, browser: BrowserHandle, googleLoginIndex = 0) => {
+    const googleChatPage = await browser.newPage(t, TestUrls.googleChat(googleLoginIndex));
+    await googleChatPage.waitAll('h3.acY'); // "No conversation selected" placeholder
+    return googleChatPage;
+  }
+
   public static openGmailPageAndVerifyComposeBtnPresent = async (t: AvaContext, browser: BrowserHandle, googleLoginIndex = 0) => {
     const gmailPage = await BrowserRecipe.openGmailPage(t, browser, googleLoginIndex);
     await gmailPage.waitAll('@action-secure-compose');
@@ -52,8 +60,15 @@ export class BrowserRecipe {
       await SetupPageRecipe.recover(settingsPage, 'flowcrypt.compatibility.1pp1', { hasRecoverMore: true, clickRecoverMore: true });
       await SetupPageRecipe.recover(settingsPage, 'flowcrypt.compatibility.2pp1');
       await settingsPage.close();
-    } else if (acct === 'ci.tests.gmail') {
+    } else if (acct === 'ci.tests.gmail' && testVariant === 'CONSUMER-LIVE-GMAIL') {
       const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'ci.tests.gmail@flowcrypt.dev');
+      await SetupPageRecipe.recover(settingsPage, 'ci.tests.gmail');
+      if (cleanup) {
+        const { cryptup_citestsgmailflowcryptdev_google_token_access: accessToken } = await settingsPage.getFromLocalStorage(['cryptup_citestsgmailflowcryptdev_google_token_access']);
+        await Promise.all([BrowserRecipe.cleanGmailAccount(accessToken as string), settingsPage.close()]);
+      }
+    } else if (acct === 'ci.tests.gmail' && testVariant !== 'CONSUMER-LIVE-GMAIL') {
+      const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'ci.tests.gmail@flowcrypt.test');
       await SetupPageRecipe.recover(settingsPage, 'ci.tests.gmail');
       if (cleanup) {
         const { cryptup_citestsgmailflowcryptdev_google_token_access: accessToken } = await settingsPage.getFromLocalStorage(['cryptup_citestsgmailflowcryptdev_google_token_access']);
@@ -81,8 +96,16 @@ export class BrowserRecipe {
     const acctEmail = 'flowcrypt.test.key.imported@gmail.com';
     const k = Config.key('flowcrypt.test.key.used.pgp');
     const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, acctEmail);
-    await SetupPageRecipe.manualEnter(settingsPage, k.title, { usedPgpBefore: false, submitPubkey: false, savePassphrase: true });
-    return { acctEmail, k, settingsPage };
+    await SetupPageRecipe.manualEnter(settingsPage, k.title, { usedPgpBefore: false, submitPubkey: false, savePassphrase: true }, { isSavePassphraseDisabled: false });
+    return { acctEmail, passphrase: k.passphrase, settingsPage };
+  }
+
+  public static setUpFcForbidPpStoringAcct = async (t: AvaContext, browser: BrowserHandle) => {
+    const acctEmail = 'user@forbid-storing-passphrase-org-rule.flowcrypt.test';
+    const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, acctEmail);
+    const key = { title: '', armored: testConstants.testKeyB8F687BCDE14435A, passphrase: 'donotstore', longid: 'B8F687BCDE14435A' };
+    await SetupPageRecipe.manualEnter(settingsPage, 'unused', { submitPubkey: false, usedPgpBefore: false, key }, { isSavePassphraseChecked: false, isSavePassphraseDisabled: true });
+    return { acctEmail, passphrase: key.passphrase, settingsPage };
   }
 
   public static async pgpBlockVerifyDecryptedContent(t: AvaContext, browser: BrowserHandle, m: TestMessage) {

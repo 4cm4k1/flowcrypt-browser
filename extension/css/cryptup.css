@@ -34,7 +34,9 @@
 }
 .button.long { width: 200px; }
 .button.longer { width: 250px; }
+.button > * { vertical-align: middle; }
 
+button.swal2-styled:focus,
 .button:focus {
   border: rgba(0, 0, 0, 0) solid 1px !important;
   outline: rgba(0, 0, 0, 0) 0 !important;
@@ -73,8 +75,7 @@ span.gray { color: #b7b7b7; }
 
 .green_label,
 .orange_label,
-.red_label,
-.gray_label {
+.red_label {
   display: inline-block;
   min-width: 150px;
   text-transform: uppercase;
@@ -87,8 +88,7 @@ span.gray { color: #b7b7b7; }
 
 .green_label.short,
 .orange_label.short,
-.red_label.short,
-.gray_label.short { min-width: 0; }
+.red_label.short { min-width: 0; }
 
 .green_label {
   color: white !important;
@@ -105,9 +105,15 @@ span.gray { color: #b7b7b7; }
   background-color: #d14836;
 }
 
-.gray_label {
-  color: white;
-  background-color: #b7b7b7;
+.icon_white {
+  filter: brightness(255);
+}
+
+.swal2-popup .swal2-styled.swal2-confirm,
+.swal2-popup .swal2-styled.swal2-cancel {
+  padding: 7px 15px;
+  border: 1px solid transparent;
+  border-radius: 3px;
 }
 
 .swal2-popup .swal2-styled.swal2-confirm.ui-modal-error-confirm,
@@ -156,9 +162,17 @@ span.gray { color: #b7b7b7; }
   border-radius: 0;
 }
 
-.swal2-popup.ui-modal-iframe .swal2-close { color: #666; }
-.swal2-popup.ui-modal-iframe .swal2-content { padding: 0; }
-.swal2-popup.ui-modal-iframe iframe { max-width: 100%; }
+.swal2-popup.ui-modal-iframe .swal2-html-container {
+  padding: 0;
+}
+
+.swal2-popup.ui-modal-iframe .swal2-close { color: #999; }
+
+.swal2-popup.ui-modal-iframe iframe {
+  display: flex;
+  max-width: 100%;
+}
+
 .swal2-container.ui-modal-page { background: rgba(0, 0, 0, 0.6) !important; }
 
 .swal2-container.ui-modal-fullscreen { padding: 0; }
@@ -256,6 +270,7 @@ div.line {
 }
 div.wide.line { max-width: 850px; }
 div.line.left { text-align: left; }
+div.line.center { text-align: center; }
 
 div.line input[type=text],
 div.line input[type=email],
@@ -279,7 +294,6 @@ body#settings.whitebg {
 
 body#settings > div#content {
   margin-top: 70px;
-  margin-bottom: 150px;
   position: relative;
 }
 
@@ -467,84 +481,63 @@ body#settings .action_show_help {
 body#settings .action_show_help img { width: 28px; }
 body#settings > .action_show_help:hover { text-decoration: underline; }
 
-body#settings a.action_show::before,
 body#settings a.action_change::before,
 body#settings a.action_remove::before {
+  display: inline-block;
   background-size: 100%;
   content: "";
   height: 25px;
-  left: 2px;
-  position: absolute;
   width: 25px;
-  top: 2.5px;
+  margin: 10px;
 }
 
-body#settings .action_show::before {
-  background-image: url("/img/svgs/contact__show-icon.svg");
-  left: 5px;
-}
 body#settings .action_change::before { background-image: url("/img/svgs/contact__edit-icon.svg"); }
 body#settings .action_remove::before { background-image: url("/img/svgs/contact__remove-icon.svg"); }
 
-body#settings > div#content.contacts #emails td:nth-child(2),
-body#settings > div#content.contacts #emails td:nth-child(3),
-body#settings > div#content.contacts #emails td:nth-child(4) {
-  display: inline-block;
-  height: 25px;
-  width: 25px;
-}
-body#settings > div#content.contacts #emails tr { margin: 10px; }
-
-body#settings > div#content.contacts #emails tr[email] {
-  display: block;
-  position: relative;
+body#settings > div#content.contacts #emails {
+  text-align: initial;
+  padding: 20px;
 }
 
-body#settings > div#content.contacts #emails tr[email] a {
-  border-radius: 15px;
-  display: block;
-  font-size: 11px;
-  font-weight: 500;
-  margin: 0 5px;
-  margin-right: 5%;
-  padding: 10px 5px;
-  position: relative;
-  text-align: center;
-  transition: 0.25s;
-  width: 20px;
+body#settings > div#content.contacts #emails .action_show_pubkey_list {
+  display: flex;
+  align-items: center;
+  height: 48px;
+  border-bottom: 1px solid #f6f6f6;
+  cursor: pointer;
 }
 
-body#settings > div#content.contacts #emails tr[email] td:first-child {
-  font-size: 16px;
-  text-align: left;
-  text-indent: 0;
-  width: 65% !important;
+body#settings > div#content.contacts #emails .action_show_pubkey_list .icon-chevron {
+  height: 15px;
+  margin: 10px;
+  transform: rotate(180deg);
+  transition: transform 0.15s;
+  opacity: 0.5;
 }
 
-body#settings > div#content.contacts #emails tr[email]::before {
-  border-radius: 4px;
-  content: "";
-  height: 90px;
-  position: absolute;
-  width: 100%;
+body#settings > div#content.contacts #emails .action_show_pubkey_list.opened .icon-chevron {
+  transform: rotate(270deg);
 }
 
-body#settings > div#content.contacts table#emails td {
-  font-size: 13px;
-  height: auto;
-  display: block;
-  width: 15px;
-  text-align: left;
-  float: left;
-  padding: 4px 15px;
+body#settings > div#content.contacts #emails .contacts-pubkey {
+  display: flex;
+  align-items: center;
+  background: #f5f5f5;
+  margin: -7px 0 7px;
+  padding-left: 30px;
+  font-size: 14px;
+  border-bottom: 1px solid #eaeaea;
 }
 
-body#settings > div#content.contacts table#emails {
-  margin: 0 auto;
-  color: #666;
-  min-width: 100%;
+body#settings > div#content.contacts #emails .contacts-pubkey .action_show {
+  flex: 1;
+  text-decoration: none;
 }
-body#settings > div#content.contacts table#emails tr { height: 32px; }
+
+body#settings > div#content.contacts #emails .contacts-pubkey:last-child {
+  margin-bottom: 10px;
+}
+
 body#settings > div#content textarea { width: 100%; }
 
 body#settings .subscribe--header-row th:nth-child(2),
@@ -709,7 +702,7 @@ body#settings > div#content.setup div.action_add_private_key {
   font-size: 15px;
 }
 
-body#settings > div#content.setup div.action_create_private {
+body#settings > div#content.setup div.action_proceed_private {
   margin-top: 20px;
   font-size: 15px;
 }
@@ -1018,6 +1011,8 @@ body#settings > div#content.dialog {
   background: white;
   z-index: 2;
   margin-top: 0;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 body#settings > div#content.dialog h1 {
@@ -1453,6 +1448,7 @@ table#compose td.input .collapsed .email_preview .rest.expired {
 table#compose td.input .collapsed .email_preview .email_address.expired { background-color: #d18826; }
 table#compose td.input .collapsed .email_preview .rest.no_pgp { border-color: #989898; }
 table#compose td.input .collapsed .email_preview .email_address.no_pgp { background-color: #989898; }
+table#compose td.input .collapsed .email_preview .email_address.revoked { background-color: #d18826; }
 
 table#compose.not-encrypted td.input .collapsed .email_preview .email_address {
   border: none !important;
@@ -1521,7 +1517,7 @@ table#compose td.recipients-inputs > div#input_addresses_container div .recipien
   right: -8px;
   cursor: pointer;
 }
-table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span > img.expired-time { opacity: 1; }
+table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span > img.revoked-or-expired { opacity: 1; }
 
 table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span i {
   padding-left: 4px;
@@ -1535,7 +1531,7 @@ table#compose td.recipients-inputs > div#input_addresses_container div .recipien
 }
 
 table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span .lock-icon,
-table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span .expired-time { margin-right: 4px; }
+table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span .revoked-or-expired { margin-right: 4px; }
 table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span .close-icon { cursor: pointer; }
 table#compose td.recipients-inputs > div#input_addrexpired-timeesses_container div .recipients > span .close-icon:hover { opacity: 1; }
 table#compose td.recipients-inputs > div#input_addresses_container div .recipients > span .close-icon.display_when_sign { display: none; }
@@ -2021,8 +2017,8 @@ table#compose #fineuploader .qq-upload-list li {
 }
 
 table#compose #fineuploader .qq-upload-list li .qq-upload-file {
-  line-height: 1em;
-  height: 1.1em;
+  line-height: 18px;
+  height: 18px;
   color: black;
   overflow-y: hidden;
 }
@@ -2144,6 +2140,7 @@ table#compose tr#password_or_pubkey_container td {
   animation: fadeInUp 1s;
   border-top: 1px solid #cfcfcf;
   line-height: 1.5;
+  position: relative;
 }
 table#compose tr#password_or_pubkey_container td input#input_password::-webkit-input-placeholder { color: #d14836; }
 
@@ -2176,7 +2173,15 @@ table#compose tr#password_or_pubkey_container td .label_password {
 
 table#compose tr#password_or_pubkey_container td .grey {
   padding: 1px 5px;
-  background: #b7b7b7;
+  background: #989898;
+  color: white;
+  display: inline-block;
+  border-radius: 5px;
+}
+
+table#compose tr#password_or_pubkey_container td .orange {
+  padding: 1px 5px;
+  background: #d18826;
   color: white;
   display: inline-block;
   border-radius: 5px;
@@ -2517,11 +2522,29 @@ body.attachment .file-format-holder img#file-format {
   box-sizing: border-box;
 }
 
-#attachment-preview-download {
-  height: 80px;
-  display: none;
+.attachment-preview-toolbar {
+  display: flex;
+  height: 60px;
+  align-items: center;
+  padding: 0 50px;
   flex-shrink: 0;
-  margin: 0 auto;
+}
+
+.attachment-preview-toolbar div {
+  flex: 1;
+}
+
+#attachment-preview-filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 16px;
+  color: white;
+  white-space: nowrap;
+}
+
+#attachment-preview-download {
+  display: none;
+  align-self: stretch;
   padding: 0 50px;
   align-items: center;
   justify-content: center;
@@ -2531,7 +2554,7 @@ body.attachment .file-format-holder img#file-format {
   text-decoration: none;
   cursor: pointer;
   border: 0;
-  opacity: 0.7;
+  opacity: 0.8;
   transition: all 0.15s ease-in;
 }
 
@@ -2740,45 +2763,6 @@ body#select_account .action_add_account::before {
   top: 13px;
 }
 
-/* cryptup dialog */
-div#cryptup_dialog {
-  position: fixed;
-  top: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0 auto;
-  z-index: 1100;
-  background-color: rgba(255, 255, 255, 0.85);
-}
-
-div#cryptup_dialog iframe {
-  position: absolute;
-  width: 640px;
-  height: 370px;
-  top: 50%;
-  left: 50%;
-  margin-left: -300px;
-  margin-top: -200px;
-  border: none;
-  box-shadow: 10px 10px 5px #888;
-  box-shadow: 0 0 25px #aaa;
-}
-
-div#cryptup_dialog iframe.short {
-  height: 300px;
-  margin-top: -300px;
-}
-
-div#cryptup_dialog iframe.medium {
-  height: 500px;
-  margin-top: -300px;
-}
-
-div#cryptup_dialog iframe.tall {
-  height: 780px;
-  margin-top: -390px;
-}
-
 .lightboxed {
   width: 700px;
   max-width: 90%;
@@ -2795,6 +2779,15 @@ div#cryptup_dialog iframe.tall {
 .mt-40 { margin-top: 40px; }
 
 .display_none { display: none; }
+
+code {
+  padding: 0.2em 0.4em;
+  margin: 0;
+  font-size: 85%;
+  color: #e83e8c;
+  background-color: #f3f4f4;
+  border-radius: 6px;
+}
 
 .scrollbar-measure {
   position: absolute;
@@ -2851,21 +2844,16 @@ body#settings div.webmail_notifications div.webmail_notification a:hover { text-
 
   .swal2-popup {
     width: auto !important;
-    flex-direction: row !important;
-    justify-content: space-around !important;
+    grid-template-columns: auto auto;
+    align-items: center;
     font-size: 0.75em !important;
     padding: 2px 20px !important;
   }
 
-  .swal2-header,
-  .swal2-content,
+  .swal2-title,
+  .swal2-html-container,
   .swal2-actions {
     padding: 0 !important;
-  }
-
-  .swal2-content {
-    display: flex !important;
-    align-items: center !important;
   }
 
   .swal2-actions {
@@ -2881,7 +2869,7 @@ body#settings div.webmail_notifications div.webmail_notification a:hover { text-
     padding: 6px !important;
     font-size: 12px !important;
   }
-  .swal2-container .swal2-content { font-size: 12px !important; }
+  .swal2-container .swal2-html-container { font-size: 12px !important; }
   .swal2-container .swal2-popup { padding: 4px !important; }
   .swal2-container .swal2-popup .swal2-actions { margin: initial !important; }
 

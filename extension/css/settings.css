@@ -25,6 +25,8 @@ html {
   display: inline-block;
   margin-left: 4px;
   border: 1px solid #31a217;
+  border-radius: 3px;
+  padding: 0 5px;
 }
 
 #header-row .logo-row .subscription > button:focus {
@@ -776,6 +778,7 @@ body#settings .settings-border .key_list {
   margin-left: 20px;
   cursor: pointer;
 }
+#settings.client > #banner > .action_finish_session img { height: 32px; }
 #settings.client .attachments { margin-top: 12px; }
 
 #settings.client .attachments span.pgp_attachment {

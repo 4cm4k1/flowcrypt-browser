@@ -8,19 +8,19 @@ import { Buf } from '../../buf.js';
 
 export class SmimeKey {
 
-  public static parse = async (text: string): Promise<Key> => {
+  public static parse = (text: string): Key => {
     if (text.includes(PgpArmor.headers('certificate').begin)) {
       return SmimeKey.parsePemCertificate(text);
     } else if (text.includes(PgpArmor.headers('pkcs12').begin)) {
       const armoredBytes = text.replace(PgpArmor.headers('pkcs12').begin, '').replace(PgpArmor.headers('pkcs12').end, '').trim();
       const emptyPassPhrase = '';
-      return await SmimeKey.parseDecryptBinary(Buf.fromBase64Str(armoredBytes), emptyPassPhrase);
+      return SmimeKey.parseDecryptBinary(Buf.fromBase64Str(armoredBytes), emptyPassPhrase);
     } else {
       throw new Error('Could not parse S/MIME key without known headers');
     }
   }
 
-  public static parseDecryptBinary = async (buffer: Uint8Array, password: string): Promise<Key> => {
+  public static parseDecryptBinary = (buffer: Uint8Array, password: string): Key => {
     const bytes = String.fromCharCode.apply(undefined, new Uint8Array(buffer) as unknown as number[]) as string;
     const asn1 = forge.asn1.fromDer(bytes);
     let certificate: forge.pki.Certificate | undefined;
@@ -46,29 +46,8 @@ export class SmimeKey {
     if (!certificate) {
       throw new Error('No user certificate found.');
     }
-    SmimeKey.removeWeakKeys(certificate);
-    const emails = SmimeKey.getNormalizedEmailsFromCertificate(certificate);
-    const key = {
-      type: 'x509',
-      id: certificate.serialNumber.toUpperCase(),
-      allIds: [certificate.serialNumber.toUpperCase()],
-      usableForEncryption: SmimeKey.isEmailCertificate(certificate),
-      usableForSigning: SmimeKey.isEmailCertificate(certificate),
-      usableForEncryptionButExpired: false,
-      usableForSigningButExpired: false,
-      emails,
-      identities: emails,
-      created: SmimeKey.dateToNumber(certificate.validity.notBefore),
-      lastModified: SmimeKey.dateToNumber(certificate.validity.notBefore),
-      expiration: SmimeKey.dateToNumber(certificate.validity.notAfter),
-      fullyDecrypted: true,
-      fullyEncrypted: false,
-      isPublic: certificate.publicKey && !certificate.privateKey,
-      isPrivate: !!certificate.privateKey,
-    } as Key;
     const headers = PgpArmor.headers('pkcs12');
-    (key as unknown as { raw: string }).raw = `${headers.begin}\n${forge.util.encode64(bytes)}\n${headers.end}`;
-    return key;
+    return SmimeKey.getKeyFromCertificate(certificate, `${headers.begin}\n${forge.util.encode64(bytes)}\n${headers.end}`);
   }
 
   /**
@@ -109,25 +88,42 @@ export class SmimeKey {
   }
 
   private static getKeyFromCertificate = (certificate: forge.pki.Certificate, pem: string): Key => {
+    if (!certificate.publicKey) {
+      throw new UnreportableError(`This S/MIME x.509 certificate doesn't have a public key`);
+    }
+    const fingerprint = forge.pki.getPublicKeyFingerprint(certificate.publicKey, { encoding: 'hex' }).toUpperCase();
     SmimeKey.removeWeakKeys(certificate);
     const emails = SmimeKey.getNormalizedEmailsFromCertificate(certificate);
+    const issuerAndSerialNumberAsn1 =
+      forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.SEQUENCE, true, [
+        // Name
+        forge.pki.distinguishedNameToAsn1(certificate.issuer),
+        // Serial
+        forge.asn1.create(forge.asn1.Class.UNIVERSAL, forge.asn1.Type.INTEGER, false,
+          forge.util.hexToBytes(certificate.serialNumber))
+      ]);
+    const expiration = SmimeKey.dateToNumber(certificate.validity.notAfter)!;
+    const expired = expiration < Date.now();
+    const usableIgnoringExpiration = SmimeKey.isEmailCertificate(certificate);
     const key = {
       type: 'x509',
-      id: certificate.serialNumber.toUpperCase(),
-      allIds: [certificate.serialNumber.toUpperCase()],
-      usableForEncryption: certificate.publicKey && SmimeKey.isEmailCertificate(certificate),
-      usableForSigning: certificate.publicKey && SmimeKey.isEmailCertificate(certificate),
-      usableForEncryptionButExpired: false,
-      usableForSigningButExpired: false,
+      id: fingerprint,
+      allIds: [fingerprint],
+      usableForEncryption: usableIgnoringExpiration && !expired,
+      usableForSigning: usableIgnoringExpiration && !expired,
+      usableForEncryptionButExpired: usableIgnoringExpiration && expired,
+      usableForSigningButExpired: usableIgnoringExpiration && expired,
       emails,
       identities: emails,
       created: SmimeKey.dateToNumber(certificate.validity.notBefore),
       lastModified: SmimeKey.dateToNumber(certificate.validity.notBefore),
-      expiration: SmimeKey.dateToNumber(certificate.validity.notAfter),
-      fullyDecrypted: false,
+      expiration,
+      fullyDecrypted: !!certificate.privateKey,
       fullyEncrypted: false,
-      isPublic: certificate.publicKey && !certificate.privateKey,
+      isPublic: !certificate.privateKey,
       isPrivate: !!certificate.privateKey,
+      revoked: false,
+      issuerAndSerialNumber: forge.asn1.toDer(issuerAndSerialNumberAsn1).getBytes()
     } as Key;
     (key as unknown as { rawArmored: string }).rawArmored = pem;
     return key;

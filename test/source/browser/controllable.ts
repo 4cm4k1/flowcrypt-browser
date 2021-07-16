@@ -417,15 +417,15 @@ abstract class ControllableBase {
       return customSelLanguageQuery;
       // eslint-disable-next-line no-cond-assign
     } else if (m = customSelLanguageQuery.match(/@(ui-modal-[a-z\-]+)\:message/)) { // tslint:disable-line:no-conditional-assignment
-      return `.${m[1]} #swal2-content`; // message inside the modal
+      return `.${m[1]} .swal2-html-container`; // message inside the modal
       // eslint-disable-next-line no-cond-assign
     } else if (m = customSelLanguageQuery.match(/@(ui-modal-[a-z\-]+)/)) { // tslint:disable-line:no-conditional-assignment
       return `.${m[1]}`; // represented as a class
       // eslint-disable-next-line no-cond-assign
-    } else if (m = customSelLanguageQuery.match(/^@([a-z0-9\-_]+)$/)) { // tslint:disable-line:no-conditional-assignment
+    } else if (m = customSelLanguageQuery.match(/^@([a-z0-9\-_]+)$/i)) { // tslint:disable-line:no-conditional-assignment
       return `[data-test="${m[1]}"]`;
       // eslint-disable-next-line no-cond-assign
-    } else if (m = customSelLanguageQuery.match(/^@([a-z0-9\-_]+)\(([^()]*)\)$/)) { // tslint:disable-line:no-conditional-assignment
+    } else if (m = customSelLanguageQuery.match(/^@([a-z0-9\-_]+)\(([^()]*)\)$/i)) { // tslint:disable-line:no-conditional-assignment
       return `//*[@data-test='${m[1]}' and contains(text(),'${m[2]}')]`;
     } else {
       return customSelLanguageQuery;
@@ -630,13 +630,11 @@ export class ControllablePage extends ControllableBase {
     return html;
   }
 
-  public getFromLocalStorage = async (keys: string[]): Promise<Dict<unknown>> => {
-    const result = await new Promise((resolve, reject) => {
-      (this.target as Page).exposeFunction('saveRawStorageResult', resolve).then(() =>
-        (this.target as Page).evaluate(keys =>
-          chrome.storage.local.get(keys, items => (window as any).saveRawStorageResult(items)), keys
-        ).then(undefined, reject), reject);
-    });
+  // passing (keys = null) will return all entries
+  public getFromLocalStorage = async (keys: string[] | null): Promise<Dict<unknown>> => {
+    const result = await (this.target as Page).evaluate(async (keys) => await new Promise((resolve) => {
+      chrome.storage.local.get(keys, resolve);
+    }), keys);
     return result as Dict<unknown>;
   }
 

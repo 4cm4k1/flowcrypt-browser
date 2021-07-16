@@ -11,7 +11,6 @@ import { PageRecipe } from './page-recipe/abstract-page-recipe';
 import { SettingsPageRecipe } from './page-recipe/settings-page-recipe';
 import { SetupPageRecipe } from './page-recipe/setup-page-recipe';
 import { TestWithBrowser } from './../test';
-import { GoogleData } from './../mock/google/google-data';
 import { Stream } from '../core/stream';
 
 // tslint:disable:no-blank-lines-func
@@ -59,22 +58,26 @@ export const defineFlakyTests = (testVariant: TestVariant, testWithBrowser: Test
 
     ava.default('setup - create key - choose no backup', testWithBrowser(undefined, async (t, browser) => {
       const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'flowcrypt.test.key.new.manual@gmail.com');
-      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'none', { submitPubkey: false, usedPgpBefore: true });
+      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'none', { submitPubkey: false, usedPgpBefore: true },
+        { isSavePassphraseChecked: false, isSavePassphraseDisabled: false });
     }));
 
     ava.default('setup - create key - backup as file - submit pubkey', testWithBrowser(undefined, async (t, browser) => {
       const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'flowcrypt.test.key.new.manual@gmail.com');
-      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'file', { submitPubkey: true, usedPgpBefore: true });
+      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'file', { submitPubkey: true, usedPgpBefore: true },
+        { isSavePassphraseChecked: false, isSavePassphraseDisabled: false });
     }));
 
-    ava.default('create@prv-create-no-prv-backup.flowcrypt.com - create key allowed but backups not', testWithBrowser(undefined, async (t, browser) => {
-      const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'setup@prv-create-no-prv-backup.flowcrypt.com');
-      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'disabled', { submitPubkey: false, usedPgpBefore: false, enforcedAlgo: 'rsa2048' });
+    ava.default('create@prv-create-no-prv-backup.flowcrypt.test - create key allowed but backups not', testWithBrowser(undefined, async (t, browser) => {
+      const settingsPage = await BrowserRecipe.openSettingsLoginApprove(t, browser, 'setup@prv-create-no-prv-backup.flowcrypt.test');
+      await SetupPageRecipe.createKey(settingsPage, 'flowcrypt.test.key.used.pgp', 'disabled', { submitPubkey: false, usedPgpBefore: false, enforcedAlgo: 'rsa2048' },
+        { isSavePassphraseChecked: false, isSavePassphraseDisabled: false });
     }));
 
     ava.default('standalone - different send from, new signed message, verification in mock', testWithBrowser('compatibility', async (t, browser) => {
       const key = Config.key('flowcryptcompatibility.from.address');
-      await SettingsPageRecipe.addKeyTest(t, browser, 'flowcrypt.compatibility@gmail.com', key.armored!, key.passphrase!);
+      await SettingsPageRecipe.addKeyTest(t, browser, 'flowcrypt.compatibility@gmail.com', key.armored!, key.passphrase!,
+        { isSavePassphraseChecked: true, isSavePassphraseDisabled: false });
       const composePage = await ComposePageRecipe.openStandalone(t, browser, 'compatibility');
       await composePage.selectOption('@input-from', 'flowcryptcompatibility@gmail.com');
       await ComposePageRecipe.fillMsg(composePage, { to: 'human@flowcrypt.com' }, 'New Signed Message (Mock Test)', { encrypt: false });
@@ -106,18 +109,6 @@ export const defineFlakyTests = (testVariant: TestVariant, testWithBrowser: Test
       const fileInput = await composePage.target.$('input[type=file]');
       await fileInput!.uploadFile('test/samples/small.txt');
       await ComposePageRecipe.sendAndClose(composePage, { password: msgPwd });
-      const msg = new GoogleData('flowcrypt.compatibility@gmail.com').getMessageBySubject(subject)!;
-      const webDecryptUrl = msg.payload!.body!.data!.replace(/&#x2F;/g, '/').match(/https:\/\/flowcrypt.com\/[a-z0-9A-Z]+/g)![0];
-      // while this test runs on a mock, it forwards the message/upload call to real backend - see `fwdToRealBackend`
-      // that's why we are able to test the message on real flowcrypt.com/api and web.
-      const webDecryptPage = await browser.newPage(t, webDecryptUrl);
-      await webDecryptPage.waitAndType('@input-msg-pwd', msgPwd);
-      await webDecryptPage.waitAndClick('@action-decrypt');
-      await webDecryptPage.waitForContent('@container-pgp-decrypted-content', subject);
-      await webDecryptPage.waitForContent('@container-pgp-decrypted-content', 'flowcrypt.compatibility test footer with an img');
-      await webDecryptPage.waitAll('@container-att-name(small.txt)');
-      const fileText = await webDecryptPage.awaitDownloadTriggeredByClicking('@container-att-name(small.txt)');
-      expect(fileText.toString()).to.equal(`small text file\nnot much here\nthis worked\n`);
     }));
 
     ava.default(`[unit][Stream.readToEnd] efficiently handles multiple chunks`, async t => {

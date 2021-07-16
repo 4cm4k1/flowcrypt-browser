@@ -81,6 +81,13 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       await newSettingsPage.waitAll('@action-connect-to-gmail');
     }));
 
+    ava.default('mail.google.com/chat', testWithBrowser(undefined, async (t, browser) => {
+      const settingsPage = await BrowserRecipe.openSettingsLoginButCloseOauthWindowBeforeGrantingPermission(t, browser, 'ci.tests.gmail@flowcrypt.dev');
+      await settingsPage.close();
+      const googleChatPage = await BrowserRecipe.openGoogleChatPage(t, browser);
+      await googleChatPage.notPresent('div.z0'); // compose button should not be injected
+    }));
+
     ava.default('mail.google.com - success notif after setup, click hides it, does not re-appear + offers to reauth', testWithBrowser('ci.tests.gmail', async (t, browser) => {
       const acct = 'ci.tests.gmail@flowcrypt.dev';
       let gmailPage = await BrowserRecipe.openGmailPage(t, browser);
@@ -141,7 +148,7 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       await gmailPage.waitAndClick('[role="row"]'); // click the first message
       await gmailPage.waitForContent('.nH.if h2', `Automated puppeteer test: ${subject}`);
       const urls = await gmailPage.getFramesUrls(['/chrome/elements/pgp_block.htm'], { sleep: 1 });
-      await GmailPageRecipe.deleteMessage(gmailPage);
+      await GmailPageRecipe.deleteThread(gmailPage);
       expect(urls.length).to.eq(1);
     }));
 
@@ -186,7 +193,7 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       const urls = await gmailPage.getFramesUrls(['/chrome/elements/pgp_pubkey.htm'], { sleep: 10, appearIn: 20 });
       expect(urls.length).to.equal(1);
       await pageHasSecureReplyContainer(t, browser, gmailPage);
-      await testMinimumElementHeight(gmailPage, '.pgp_block.signedMsg', 120);
+      await testMinimumElementHeight(gmailPage, '.pgp_block.signedMsg', 80);
       await testMinimumElementHeight(gmailPage, '.pgp_block.publicKey', 120);
       const pubkeyPage = await browser.newPage(t, urls[0]);
       await pubkeyPage.waitForContent('@container-pgp-pubkey', 'Fingerprint: DC26 454A FB71 D18E ABBA D73D 1C7E 6D3C 5563 A941');
@@ -196,7 +203,7 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       const gmailPage = await openGmailPage(t, browser, '/FMfcgxwKjBTWTbDjXSJVjDjKlWJGbWQd');
       const urls = await gmailPage.getFramesUrls(['/chrome/elements/pgp_block.htm'], { sleep: 10, appearIn: 20 });
       expect(urls.length).to.equal(1);
-      await testMinimumElementHeight(gmailPage, '.pgp_block.signedMsg', 120);
+      await testMinimumElementHeight(gmailPage, '.pgp_block.signedMsg', 80);
       await testMinimumElementHeight(gmailPage, '.pgp_block.publicKey', 120);
       const url = urls[0].split('/chrome/elements/pgp_block.htm')[1];
       const signature = ['Dhartley@Verdoncollege.School.Nz', 'matching signature'];
@@ -222,8 +229,7 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       await pubkeyPage.waitForContent('@container-pgp-pubkey', 'Fingerprint: DCB2 74D2 4683 145E B053 BC0B 48E4 74A0 926B AE86');
     }));
 
-    // flaky test
-    ava.default.skip('mail.google.com - secure reply btn, reply draft', testWithBrowser('ci.tests.gmail', async (t, browser) => {
+    ava.default('mail.google.com - secure reply btn, reply draft', testWithBrowser('ci.tests.gmail', async (t, browser) => {
       const gmailPage = await openGmailPage(t, browser, '/FMfcgxwJXVGtMJwQTZmBDlspVWDvsnnL'); // encrypted convo
       await Util.sleep(5);
       await pageHasSecureReplyContainer(t, browser, gmailPage, { isReplyPromptAccepted: false });
@@ -232,7 +238,7 @@ export const defineGmailTests = (testVariant: TestVariant, testWithBrowser: Test
       await gmailPage.page.keyboard.type('hey there');
       await Util.sleep(5);
       await gmailPage.page.reload();
-      await Util.sleep(3);
+      await Util.sleep(5);
       const replyBox = await pageHasSecureDraft(t, browser, gmailPage, 'hey there');
       await replyBox.waitAndClick('@action-send');
       await Util.sleep(5);

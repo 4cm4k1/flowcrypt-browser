@@ -14,25 +14,34 @@ import { Xss } from '../../js/common/platform/xss.js';
 import { initPassphraseToggle } from '../../js/common/ui/passphrase-ui.js';
 import { KeyStore } from '../../js/common/platform/store/key-store.js';
 import { PassphraseStore } from '../../js/common/platform/store/passphrase-store.js';
+import { Settings } from '../../js/common/settings.js';
+import { OrgRules } from '../../js/common/org-rules.js';
 
 View.run(class PassphraseView extends View {
   private readonly acctEmail: string;
   private readonly parentTabId: string;
   private readonly longids: string[];
   private readonly type: string;
+  private readonly initiatorFrameId?: string;
   private keysWeNeedPassPhraseFor: KeyInfo[] | undefined;
+  private orgRules!: OrgRules;
 
   constructor() {
     super();
-    const uncheckedUrlParams = Url.parse(['acctEmail', 'parentTabId', 'longids', 'type']);
+    const uncheckedUrlParams = Url.parse(['acctEmail', 'parentTabId', 'longids', 'type', 'initiatorFrameId']);
     this.acctEmail = Assert.urlParamRequire.string(uncheckedUrlParams, 'acctEmail');
     this.parentTabId = Assert.urlParamRequire.string(uncheckedUrlParams, 'parentTabId');
     this.longids = Assert.urlParamRequire.string(uncheckedUrlParams, 'longids').split(',');
     this.type = Assert.urlParamRequire.oneof(uncheckedUrlParams, 'type', ['embedded', 'sign', 'message', 'draft', 'attachment', 'quote', 'backup']);
+    this.initiatorFrameId = Assert.urlParamRequire.optionalString(uncheckedUrlParams, 'initiatorFrameId');
   }
 
   public render = async () => {
     Ui.event.protect();
+    this.orgRules = await OrgRules.newInstance(this.acctEmail);
+    if (!this.orgRules.forbidStoringPassPhrase()) {
+      $('.forget').prop('disabled', false);
+    }
     await initPassphraseToggle(['passphrase']);
     const allPrivateKeys = await KeyStore.get(this.acctEmail);
     this.keysWeNeedPassPhraseFor = allPrivateKeys.filter(ki => this.longids.includes(ki.longid));
@@ -72,13 +81,39 @@ View.run(class PassphraseView extends View {
     $('#passphrase').keyup(this.setHandler(() => this.renderNormalPpPrompt()));
     $('.action_close').click(this.setHandler(() => this.closeDialog()));
     $('.action_ok').click(this.setHandler(() => this.submitHandler()));
+    $('#lost-pass-phrase').click(this.setHandler((el, ev) => {
+      ev.preventDefault();
+      Ui.modal.info(`
+        <div style="text-align: initial">
+          <strong>Do you have at least one other working device where
+          you can still read your encrypted email?</strong>
+          <p><strong>If yes:</strong> open the working device and go to
+          <code>FlowCrypt Settings</code> > <code>Security</code> >
+          <code>Change Pass Phrase</code>.<br>
+          It will let you change it without knowing the previous one. When done,
+          <a href class="reset-flowcrypt">reset FlowCrypt on this device</a>
+          and use the new pass phrase during the recovery step when
+          you set up FlowCrypt on this device again.
+          <p><strong>If no:</strong> unfortunately, you will not be able to read
+          previously encrypted emails regardless of what you do.
+          You can <a href class="reset-flowcrypt">reset FlowCrypt on this device</a>
+          and then click <code>Lost your pass phrase?</code> during recovery step.
+        </div>
+      `, true).catch(Catch.reportErr);
+      $('.reset-flowcrypt').click(this.setHandler(async (el, ev) => {
+        ev.preventDefault();
+        if (await Settings.resetAccount(this.acctEmail)) {
+          this.closeDialog();
+        }
+      }));
+    }));
     $('#passphrase').keydown(this.setHandler((el, ev) => {
-      if (ev.which === 13) {
+      if (ev.key === 'Enter') {
         $('.action_ok').click();
       }
     }));
     $('body').on('keydown', this.setHandler((el, ev) => {
-      if (ev.which === 27) { // If 'ESC' key
+      if (ev.key === 'Escape') {
         this.closeDialog();
       }
     }));
@@ -97,14 +132,14 @@ View.run(class PassphraseView extends View {
     $('#passphrase').attr('placeholder', 'Please try again');
   }
 
-  private closeDialog = (entered: boolean = false) => {
-    BrowserMsg.send.passphraseEntry('broadcast', { entered });
+  private closeDialog = (entered: boolean = false, initiatorFrameId?: string) => {
     BrowserMsg.send.closeDialog(this.parentTabId);
+    BrowserMsg.send.passphraseEntry('broadcast', { entered, initiatorFrameId });
   }
 
   private submitHandler = async () => {
     const pass = String($('#passphrase').val());
-    const storageType: StorageType = $('.forget').prop('checked') ? 'session' : 'local';
+    const storageType: StorageType = ($('.forget').prop('checked') || this.orgRules.forbidStoringPassPhrase()) ? 'session' : 'local';
     let atLeastOneMatched = false;
     for (const keyinfo of this.keysWeNeedPassPhraseFor!) { // if passphrase matches more keys, it will save the pass phrase for all keys
       const prv = await KeyUtil.parse(keyinfo.private);
@@ -128,7 +163,7 @@ View.run(class PassphraseView extends View {
       }
     }
     if (atLeastOneMatched) {
-      this.closeDialog(true);
+      this.closeDialog(true, this.initiatorFrameId);
     } else {
       this.renderFailedEntryPpPrompt();
       Catch.setHandledTimeout(() => this.renderNormalPpPrompt(), 1500);

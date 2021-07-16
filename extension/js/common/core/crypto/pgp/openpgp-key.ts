@@ -232,6 +232,7 @@ export class OpenPGPKey {
         curve: (algoInfo as any).curve as string | undefined,
         algorithmId: opgp.enums.publicKey[algoInfo.algorithm]
       },
+      revoked: keyWithoutWeakPackets.revocationSignatures.length > 0
     } as Key);
     (key as any)[internal] = keyWithoutWeakPackets;
     (key as any).rawKey = opgpKey;
@@ -269,18 +270,6 @@ export class OpenPGPKey {
     } else {
       return await opgp.stream.readToEnd(certificate);
     }
-  }
-
-  public static armor = (pubkey: Key): string => {
-    if (pubkey.type !== 'openpgp') {
-      throw new UnexpectedKeyTypeError(`Key type is ${pubkey.type}, expecting OpenPGP`);
-    }
-    // some keys saved by older version may have `raw` as string, so fall back on it
-    const extensions = pubkey as unknown as { rawArmored: string, raw: string };
-    if (!extensions.rawArmored && !extensions.raw) {
-      throw new Error('Object has type == "openpgp" but no raw key.');
-    }
-    return extensions.rawArmored ?? extensions.raw;
   }
 
   public static keyFlagsToString = (flags: OpenPGP.enums.keyFlags): string => {
@@ -391,9 +380,6 @@ export class OpenPGPKey {
   }
 
   public static fingerprintToLongid = (fingerprint: string) => {
-    if (fingerprint.length === 32) { // s/mime keys
-      return fingerprint; // leave as is - s/mime has no concept of longids
-    }
     if (fingerprint.length === 40) { // pgp keys
       return fingerprint.substr(-16).toUpperCase();
     }

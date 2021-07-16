@@ -415,10 +415,10 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
           $(recipient.element).removeClass('no_pgp').find('i').remove();
           clearInterval(this.addedPubkeyDbLookupInterval);
           recipientsHasPgp.push(recipient);
+          await this.evaluateRecipients(recipientsHasPgp);
+          await this.setEmailsPreview(this.getRecipients());
         }
       }
-      await this.evaluateRecipients(recipientsHasPgp);
-      await this.setEmailsPreview(this.getRecipients());
     }, 1000);
   }
 
@@ -458,6 +458,7 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
         currentActive.removeClass('active');
       } else { // We need to force add recipient even it's invalid
         this.parseRenderRecipients($(e.target), true).catch(Catch.reportErr);
+        this.hideContacts();
       }
       e.target.focus();
       return true;
@@ -578,6 +579,9 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
   }
 
   private renderSearchRes = (input: JQuery<HTMLElement>, contacts: ContactPreview[], query: ProviderContactsQuery) => {
+    if (!input.is(':focus')) { // focus was moved away from input
+      return;
+    }
     if ((input.val() as string).toLowerCase() !== query.substring.toLowerCase()) { // the input value has changed meanwhile
       return;
     }
@@ -679,6 +683,7 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
         if (authResult.result === 'Success') {
           this.canSearchContacts = true;
           this.hideContacts();
+          input.focus();
           await this.searchContacts(input);
         } else if (authResult.result !== 'Closed') {
           await Ui.modal.error(`Could not enable Google Contact search. Please write us at human@flowcrypt.com\n\n[${authResult.result}] ${authResult.error}`);
@@ -746,7 +751,7 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
         toLookup.push(contact);
       }
     }
-    await Promise.all(toLookup.map(c => this.view.storageModule.ksLookupUnknownContactPubAndSaveToDb(c.email, c.name || undefined).then(lookupRes => {
+    await Promise.all(toLookup.map(c => this.view.storageModule.ksLookupUnknownContactPubAndSaveToDb(c.email, c.name || undefined, undefined).then(lookupRes => {
       if (lookupRes === 'fail') {
         this.failedLookupEmails.push(c.email);
       }
@@ -830,8 +835,14 @@ export class ComposeRecipientsModule extends ViewModule<ComposeView> {
     } else if (contact.pubkey && ((contact.expiresOn || Infinity) <= Date.now() || contact.pubkey.usableForEncryptionButExpired)) {
       recipient.status = RecipientStatus.EXPIRED;
       $(el).addClass("expired");
-      Xss.sanitizePrepend(el, '<img src="/img/svgs/expired-timer.svg" class="expired-time">');
+      Xss.sanitizePrepend(el, '<img src="/img/svgs/expired-timer.svg" class="revoked-or-expired">');
       $(el).attr('title', 'Does use encryption but their public key is expired. You should ask them to send ' +
+        'you an updated public key.' + this.recipientKeyIdText(contact));
+    } else if (contact.revoked) {
+      recipient.status = RecipientStatus.REVOKED;
+      $(el).addClass("revoked");
+      Xss.sanitizePrepend(el, '<img src="/img/svgs/revoked.svg" class="revoked-or-expired">');
+      $(el).attr('title', 'Does use encryption but their public key is revoked. You should ask them to send ' +
         'you an updated public key.' + this.recipientKeyIdText(contact));
     } else if (contact.pubkey) {
       recipient.status = RecipientStatus.HAS_PGP;

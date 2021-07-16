@@ -20,9 +20,10 @@ import { MsgBlock } from '../msg-block.js';
  */
 export interface Key {
   type: 'openpgp' | 'x509';
-  id: string; // This is a fingerprint for OpenPGP keys and Serial Number for X.509 keys.
-  allIds: string[]; // a list of fingerprints for OpenPGP key or a Serial Number for X.509 keys.
+  id: string; // a fingerprint of the primary key in OpenPGP, and similarly a fingerprint of the actual cryptographic key (eg RSA fingerprint) in S/MIME
+  allIds: string[]; // a list of fingerprints, including those for subkeys
   created: number;
+  revoked: boolean;
   lastModified: number | undefined; // date of last signature, or undefined if never had valid signature
   expiration: number | undefined; // number of millis of expiration or undefined if never expires
   usableForEncryption: boolean;
@@ -43,6 +44,7 @@ export interface Key {
     bits?: number,
     algorithmId: number
   };
+  issuerAndSerialNumber?: string | undefined; // DER-encoded IssuerAndSerialNumber of X.509 Certificate as raw string
 }
 
 export type PubkeyResult = { pubkey: Key, email: string, isMine: boolean };
@@ -56,6 +58,7 @@ export type Contact = {
   lastUse: number | null;
   pubkeyLastCheck: number | null;
   expiresOn: number | null;
+  revoked: boolean;
 };
 
 export interface KeyInfo {
@@ -66,8 +69,9 @@ export interface KeyInfo {
   emails?: string[]; // todo - used to be missing - but migration was supposed to add it? setting back to optional for now
 }
 
-export interface KeyInfoWithOptionalPp extends KeyInfo {
+export interface ExtendedKeyInfo extends KeyInfo {
   passphrase?: string;
+  type: 'openpgp' | 'x509'
 }
 
 export type KeyAlgo = 'curve25519' | 'rsa2048' | 'rsa4096';
@@ -130,7 +134,7 @@ export class KeyUtil {
       return await OpenPGPKey.parseMany(text);
     } else if (keyType === 'x509') {
       // TODO: No support for parsing multiple S/MIME keys for now
-      return [await SmimeKey.parse(text)];
+      return [SmimeKey.parse(text)];
     }
     throw new UnexpectedKeyTypeError(`Key type is ${keyType}, expecting OpenPGP or x509 S/MIME`);
   }
@@ -160,7 +164,7 @@ export class KeyUtil {
     }
     if (!allKeys.length) {
       try {
-        allKeys.push(await SmimeKey.parseDecryptBinary(key, passPhrase ?? ''));
+        allKeys.push(SmimeKey.parseDecryptBinary(key, passPhrase ?? ''));
         return { keys: allKeys, err: [] };
       } catch (e) {
         allErr.push(e as Error);
@@ -178,15 +182,11 @@ export class KeyUtil {
   }
 
   public static armor = (pubkey: Key): string => {
-    if (pubkey.type === 'openpgp') {
-      return OpenPGPKey.armor(pubkey);
-    } else if (pubkey.type === 'x509') {
-      // some keys saved by older version may have `raw` as string, so fall back on it
-      const rawFields = pubkey as unknown as { rawArmored: string, raw: string };
-      return rawFields.rawArmored ?? rawFields.raw;
-    } else {
-      throw new Error('Unknown pubkey type: ' + pubkey.type);
+    const armored = (pubkey as unknown as { rawArmored: string }).rawArmored;
+    if (!armored) {
+      throw new Error('The Key object has no rawArmored field.');
     }
+    return armored;
   }
 
   public static diagnose = async (key: Key, passphrase: string): Promise<Map<string, string>> => {
@@ -339,13 +339,38 @@ export class KeyUtil {
     if (!prv.isPrivate) {
       throw new Error('Key passed into KeyUtil.keyInfoObj must be a Private Key');
     }
+    const pubkey = await KeyUtil.asPublicKey(prv);
     return {
       private: KeyUtil.armor(prv),
-      public: KeyUtil.armor(await KeyUtil.asPublicKey(prv)),
-      longid: OpenPGPKey.fingerprintToLongid(prv.id),
+      public: KeyUtil.armor(pubkey),
+      longid: KeyUtil.getPrimaryLongid(pubkey),
       emails: prv.emails,
       fingerprints: prv.allIds,
     };
   }
 
+  public static getPubkeyLongids = (pubkey: Key): string[] => {
+    if (pubkey.type !== 'x509') {
+      return pubkey.allIds.map(id => OpenPGPKey.fingerprintToLongid(id));
+    }
+    return [KeyUtil.getPrimaryLongid(pubkey)];
+  }
+
+  public static getPrimaryLongid = (pubkey: Key): string => {
+    if (pubkey.type !== 'x509') {
+      return OpenPGPKey.fingerprintToLongid(pubkey.id);
+    }
+    const encodedIssuerAndSerialNumber = 'X509-' + Buf.fromRawBytesStr(pubkey.issuerAndSerialNumber!).toBase64Str();
+    if (!encodedIssuerAndSerialNumber) {
+      throw new Error(`Cannot extract IssuerAndSerialNumber from the certificate for: ${pubkey.id}`);
+    }
+    return encodedIssuerAndSerialNumber;
+  }
+
+  public static getKeyInfoLongids = (ki: ExtendedKeyInfo): string[] => {
+    if (ki.type !== 'x509') {
+      return ki.fingerprints.map(fp => OpenPGPKey.fingerprintToLongid(fp));
+    }
+    return [ki.longid];
+  }
 }

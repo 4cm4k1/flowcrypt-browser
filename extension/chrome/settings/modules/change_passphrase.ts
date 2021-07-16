@@ -13,6 +13,8 @@ import { View } from '../../../js/common/view.js';
 import { initPassphraseToggle } from '../../../js/common/ui/passphrase-ui.js';
 import { PassphraseStore } from '../../../js/common/platform/store/passphrase-store.js';
 import { KeyStore } from '../../../js/common/platform/store/key-store.js';
+import { OrgRules } from '../../../js/common/org-rules.js';
+import { BrowserMsg } from '../../../js/common/browser/browser-msg.js';
 
 View.run(class ChangePassPhraseView extends View {
 
@@ -22,6 +24,7 @@ View.run(class ChangePassPhraseView extends View {
 
   private primaryKi: KeyInfo | undefined;
   private primaryPrv: Key | undefined;
+  private orgRules!: OrgRules;
 
   constructor() {
     super();
@@ -31,6 +34,7 @@ View.run(class ChangePassPhraseView extends View {
   }
 
   public render = async () => {
+    this.orgRules = await OrgRules.newInstance(this.acctEmail);
     await initPassphraseToggle(['current_pass_phrase', 'new_pass_phrase', 'new_pass_phrase_confirm']);
     const privateKeys = await KeyStore.get(this.acctEmail);
     if (privateKeys.length > 1) {
@@ -107,11 +111,17 @@ View.run(class ChangePassPhraseView extends View {
       return;
     }
     await KeyStore.add(this.acctEmail, this.primaryPrv!);
-    const persistentlyStoredPp = await PassphraseStore.get(this.acctEmail, this.primaryKi!.fingerprints[0], true);
-    await PassphraseStore.set('local', this.acctEmail, this.primaryKi!.fingerprints[0], typeof persistentlyStoredPp === 'undefined' ? undefined : newPp);
-    await PassphraseStore.set('session', this.acctEmail, this.primaryKi!.fingerprints[0], typeof persistentlyStoredPp === 'undefined' ? newPp : undefined);
-    await Ui.modal.info('Now that you changed your pass phrase, you should back up your key. New backup will be protected with new passphrase.');
-    Settings.redirectSubPage(this.acctEmail, this.parentTabId, '/chrome/settings/modules/backup.htm', '&action=backup_manual');
+    const shouldSavePassphraseInStorage = !this.orgRules.forbidStoringPassPhrase() &&
+      !!(await PassphraseStore.get(this.acctEmail, this.primaryKi!.fingerprints[0], true));
+    await PassphraseStore.set('local', this.acctEmail, this.primaryKi!.fingerprints[0], shouldSavePassphraseInStorage ? newPp : undefined);
+    await PassphraseStore.set('session', this.acctEmail, this.primaryKi!.fingerprints[0], shouldSavePassphraseInStorage ? undefined : newPp);
+    if (this.orgRules.canBackupKeys()) {
+      await Ui.modal.info('Now that you changed your pass phrase, you should back up your key. New backup will be protected with new passphrase.');
+      Settings.redirectSubPage(this.acctEmail, this.parentTabId, '/chrome/settings/modules/backup.htm', '&action=backup_manual');
+    } else {
+      await Ui.modal.info('Pass phrase changed for this device');
+      BrowserMsg.send.closePage(this.parentTabId);
+    }
   }
 
   private displayBlock = (name: string) => {

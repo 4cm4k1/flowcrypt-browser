@@ -18,6 +18,7 @@ import { Ui } from './ui.js';
 import { GlobalStoreDict, GlobalIndex } from '../platform/store/global-store.js';
 import { AcctStoreDict, AccountIndex } from '../platform/store/acct-store.js';
 import { Contact, Key, KeyUtil } from '../core/crypto/key.js';
+import { OpenPGPKey } from '../core/crypto/pgp/openpgp-key.js';
 
 export type GoogleAuthWindowResult$result = 'Success' | 'Denied' | 'Error' | 'Closed';
 
@@ -31,7 +32,7 @@ export namespace Bm {
   export type SetCss = { css: Dict<string>, traverseUp?: number, selector: string; };
   export type AddOrRemoveClass = { class: string, selector: string; };
   export type Settings = { path?: string, page?: string, acctEmail?: string, pageUrlParams?: UrlParams, addNewAcct?: boolean };
-  export type PassphraseDialog = { type: PassphraseDialogType, longids: string[] };
+  export type PassphraseDialog = { type: PassphraseDialogType, longids: string[], initiatorFrameId?: string };
   export type ScrollToReplyBox = { replyMsgId: string };
   export type ScrollToCursorInReplyBox = { replyMsgId: string, cursorOffsetTop: number };
   export type NotificationShow = { notification: string, callbacks?: Dict<() => void> };
@@ -47,7 +48,7 @@ export namespace Bm {
   export type OpenGoogleAuthDialog = { acctEmail?: string, scopes?: string[] };
   export type OpenPage = { page: string, addUrlText?: string | UrlParams };
   export type StripeResult = { token: string };
-  export type PassphraseEntry = { entered: boolean; };
+  export type PassphraseEntry = { entered: boolean, initiatorFrameId?: string };
   export type Db = { f: string, args: any[] };
   export type StoreSessionSet = { acctEmail: string, key: string, value: string | undefined };
   export type StoreSessionGet = { acctEmail: string, key: string };
@@ -62,6 +63,7 @@ export namespace Bm {
   export type PgpHashChallengeAnswer = { answer: string };
   export type PgpMsgType = PgpMsgMethod.Arg.Type;
   export type KeyParse = { armored: string };
+  export type KeyMatch = { pubkeys: string[], longid: string };
   export type Ajax = { req: JQueryAjaxSettings, stack: string };
   export type AjaxGmailAttachmentGetChunk = { acctEmail: string, msgId: string, attachmentId: string };
   export type ShowAttachmentPreview = { iframeUrl: string };
@@ -82,6 +84,7 @@ export namespace Bm {
     export type PgpMsgType = PgpMsgTypeResult;
     export type PgpHashChallengeAnswer = { hashed: string };
     export type KeyParse = { key: Key };
+    export type KeyMatch = { key: Key | undefined };
     export type AjaxGmailAttachmentGetChunk = { chunk: Buf };
     export type _tab_ = { tabId: string | null | undefined };
     export type Db = any; // not included in Any below
@@ -90,7 +93,7 @@ export namespace Bm {
     export type Any = GetActiveTabInfo | _tab_ | ReconnectAcctAuthPopup
       | PgpMsgDecrypt | PgpMsgDiagnoseMsgPubkeys | PgpMsgVerify | PgpHashChallengeAnswer | PgpMsgType | KeyParse
       | StoreSessionGet | StoreSessionSet | StoreAcctGet | StoreAcctSet | StoreGlobalGet | StoreGlobalSet
-      | AjaxGmailAttachmentGetChunk;
+      | AjaxGmailAttachmentGetChunk | KeyMatch;
   }
 
   export type AnyRequest = PassphraseEntry | StripeResult | OpenPage | OpenGoogleAuthDialog | Redirect | Reload |
@@ -99,7 +102,7 @@ export namespace Bm {
     NotificationShow | PassphraseDialog | PassphraseDialog | Settings | SetCss | AddOrRemoveClass | ReconnectAcctAuthPopup |
     Db | StoreSessionSet | StoreSessionGet | StoreGlobalGet | StoreGlobalSet | StoreAcctGet | StoreAcctSet | KeyParse |
     PgpMsgDecrypt | PgpMsgDiagnoseMsgPubkeys | PgpMsgVerifyDetached | PgpHashChallengeAnswer | PgpMsgType | Ajax | FocusFrame |
-    ShowAttachmentPreview | ReRenderRecipient;
+    ShowAttachmentPreview | ReRenderRecipient | KeyMatch;
 
   // export type RawResponselessHandler = (req: AnyRequest) => Promise<void>;
   // export type RawRespoHandler = (req: AnyRequest) => Promise<void>;
@@ -133,6 +136,8 @@ export class BrowserMsg {
         getActiveTabInfo: () => BrowserMsg.sendAwait(undefined, 'get_active_tab_info', undefined, true) as Promise<Bm.Res.GetActiveTabInfo>,
         storeSessionGet: (bm: Bm.StoreSessionGet) => BrowserMsg.sendAwait(undefined, 'session_get', bm, true) as Promise<Bm.Res.StoreSessionGet>,
         storeSessionSet: (bm: Bm.StoreSessionSet) => BrowserMsg.sendAwait(undefined, 'session_set', bm, true) as Promise<Bm.Res.StoreSessionSet>,
+        storeSessionPassphraseGet: (bm: Bm.StoreSessionGet) => BrowserMsg.sendAwait(undefined, 'session_passphrase_get', bm, true) as Promise<Bm.Res.StoreSessionGet>,
+        storeSessionPassphraseSet: (bm: Bm.StoreSessionSet) => BrowserMsg.sendAwait(undefined, 'session_passphrase_set', bm, true) as Promise<Bm.Res.StoreSessionSet>,
         storeGlobalGet: (bm: Bm.StoreGlobalGet) => BrowserMsg.sendAwait(undefined, 'storeGlobalGet', bm, true) as Promise<Bm.Res.StoreGlobalGet>,
         storeGlobalSet: (bm: Bm.StoreGlobalSet) => BrowserMsg.sendAwait(undefined, 'storeGlobalSet', bm, true) as Promise<Bm.Res.StoreGlobalSet>,
         storeAcctGet: (bm: Bm.StoreAcctGet) => BrowserMsg.sendAwait(undefined, 'storeAcctGet', bm, true) as Promise<Bm.Res.StoreAcctGet>,
@@ -146,6 +151,7 @@ export class BrowserMsg {
         pgpMsgDecrypt: (bm: Bm.PgpMsgDecrypt) => BrowserMsg.sendAwait(undefined, 'pgpMsgDecrypt', bm, true) as Promise<Bm.Res.PgpMsgDecrypt>,
         pgpMsgVerifyDetached: (bm: Bm.PgpMsgVerifyDetached) => BrowserMsg.sendAwait(undefined, 'pgpMsgVerifyDetached', bm, true) as Promise<Bm.Res.PgpMsgVerify>,
         keyParse: (bm: Bm.KeyParse) => BrowserMsg.sendAwait(undefined, 'keyParse', bm, true) as Promise<Bm.Res.KeyParse>,
+        keyMatch: (bm: Bm.KeyMatch) => BrowserMsg.sendAwait(undefined, 'keyMatch', bm, true) as Promise<Bm.Res.KeyMatch>,
         pgpMsgType: (bm: Bm.PgpMsgType) => BrowserMsg.sendAwait(undefined, 'pgpMsgType', bm, true) as Promise<Bm.Res.PgpMsgType>,
       },
     },
@@ -159,7 +165,6 @@ export class BrowserMsg {
     closeDialog: (dest: Bm.Dest) => BrowserMsg.sendCatch(dest, 'close_dialog', {}),
     closePage: (dest: Bm.Dest) => BrowserMsg.sendCatch(dest, 'close_page', {}),
     closeNewMessage: (dest: Bm.Dest) => BrowserMsg.sendCatch(dest, 'close_new_message', {}),
-    closeSwal: (dest: Bm.Dest) => BrowserMsg.sendCatch(dest, 'close_swal', {}),
     focusBody: (dest: Bm.Dest) => BrowserMsg.sendCatch(dest, 'focus_body', {}),
     focusFrame: (dest: Bm.Dest, bm: Bm.FocusFrame) => BrowserMsg.sendCatch(dest, 'focus_frame', bm),
     closeReplyMessage: (dest: Bm.Dest, bm: Bm.CloseReplyMessage) => BrowserMsg.sendCatch(dest, 'close_reply_message', bm),
@@ -244,6 +249,11 @@ export class BrowserMsg {
     BrowserMsg.bgAddListener('pgpMsgVerifyDetached', MsgUtil.verifyDetached);
     BrowserMsg.bgAddListener('pgpMsgType', MsgUtil.type);
     BrowserMsg.bgAddListener('keyParse', async (r: Bm.KeyParse) => ({ key: await KeyUtil.parse(r.armored) }));
+    BrowserMsg.bgAddListener('keyMatch', async (r: Bm.KeyMatch) => ({
+      key:
+        (await Promise.all(r.pubkeys.map(async (pub) => await KeyUtil.parse(pub)))).
+          find(k => k.allIds.map(id => OpenPGPKey.fingerprintToLongid(id).includes(r.longid)))
+    }));
   }
 
   public static addListener = (name: string, handler: Handler) => {

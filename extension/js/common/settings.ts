@@ -6,7 +6,9 @@ import { Dict, Str, Url, UrlParams } from './core/common.js';
 import { Ui } from './browser/ui.js';
 import { Api } from './api/shared/api.js';
 import { ApiErr, AjaxErr } from './api/shared/api-error.js';
+import { Attachment } from './core/attachment.js';
 import { Browser } from './browser/browser.js';
+import { Buf } from './core/buf.js';
 import { Catch } from './platform/catch.js';
 import { Env } from './browser/env.js';
 import { Gmail } from './api/email-provider/gmail/gmail.js';
@@ -32,11 +34,7 @@ export class Settings {
   }
 
   public static renderSubPage = async (acctEmail: string | undefined, tabId: string, page: string, addUrlTextOrParams?: string | UrlParams) => {
-    await Ui.modal.iframe(
-      Settings.prepareNewSettingsLocationUrl(acctEmail, tabId, page, addUrlTextOrParams),
-      Math.min(800, $('body').width()! - 200),
-      $('body').height()! - ($('body').height()! > 800 ? 150 : 75)
-    );
+    await Ui.modal.iframe(Settings.prepareNewSettingsLocationUrl(acctEmail, tabId, page, addUrlTextOrParams));
   }
 
   public static redirectSubPage = (acctEmail: string, parentTabId: string, page: string, addUrlTextOrParams?: string | UrlParams) => {
@@ -109,30 +107,51 @@ export class Settings {
     if (!acctEmails.includes(oldAcctEmail)) {
       throw new Error(`"${oldAcctEmail}" is not a known account_email in "${JSON.stringify(acctEmails)}"`);
     }
-    const storageIndexesToChange: string[] = [];
     const oldAcctEmailIndexPrefix = AbstractStore.singleScopeRawIndex(oldAcctEmail, '');
     const newAcctEmailIndexPrefix = AbstractStore.singleScopeRawIndex(newAcctEmail, '');
-    // in case the destination email address was already set up with an account, recover keys and pass phrases before it's overwritten
-    const destAccountPrivateKeys = await KeyStore.get(newAcctEmail);
-    const destAcctPassPhrases: Dict<string> = {};
-    for (const ki of destAccountPrivateKeys) {
-      const pp = await PassphraseStore.get(newAcctEmail, ki.fingerprints[0], true);
-      if (pp) {
-        destAcctPassPhrases[ki.fingerprints[0]] = pp;
-      }
-    }
     if (!oldAcctEmailIndexPrefix) {
       throw new Error(`Filter is empty for account_email "${oldAcctEmail}"`);
     }
-    await GlobalStore.acctEmailsAdd(newAcctEmail);
-    const storage = await storageLocalGetAll();
-    for (const key of Object.keys(storage)) {
-      if (key.indexOf(oldAcctEmailIndexPrefix) === 0) {
-        storageIndexesToChange.push(key.replace(oldAcctEmailIndexPrefix, ''));
+    // in case the destination email address was already set up with an account, recover keys and pass phrases before it's overwritten
+    const oldAccountPrivateKeys = await KeyStore.get(oldAcctEmail);
+    const newAccountPrivateKeys = await KeyStore.get(newAcctEmail);
+    const oldAcctPassPhrases: Dict<string> = {};
+    const newAcctPassPhrases: Dict<string> = {};
+    for (const ki of oldAccountPrivateKeys) {
+      const pp = await PassphraseStore.get(oldAcctEmail, ki.fingerprints[0], true);
+      if (pp) {
+        oldAcctPassPhrases[ki.fingerprints[0]] = pp;
       }
     }
-    const oldAcctStorage = await AcctStore.get(oldAcctEmail, storageIndexesToChange as any);
-    await AcctStore.set(newAcctEmail, oldAcctStorage);
+    for (const ki of newAccountPrivateKeys) {
+      const pp = await PassphraseStore.get(newAcctEmail, ki.fingerprints[0], true);
+      if (pp) {
+        newAcctPassPhrases[ki.fingerprints[0]] = pp;
+      }
+    }
+    await GlobalStore.acctEmailsAdd(newAcctEmail);
+    const storageIndexesToKeepOld: string[] = [];
+    const storageIndexesToKeepNew: string[] = [];
+    const storage = await storageLocalGetAll();
+    for (const acctKey of Object.keys(storage)) {
+      if (acctKey.startsWith(oldAcctEmailIndexPrefix)) {
+        const key = acctKey.substr(oldAcctEmailIndexPrefix.length);
+        const mode = Settings.getOverwriteMode(key);
+        if (mode !== 'forget') {
+          storageIndexesToKeepOld.push(key);
+        }
+      } else if (acctKey.startsWith(newAcctEmailIndexPrefix)) {
+        const key = acctKey.substr(newAcctEmailIndexPrefix.length);
+        const mode = Settings.getOverwriteMode(key);
+        if (mode !== 'keep') {
+          storageIndexesToKeepNew.push(key);
+        }
+      }
+    }
+    const oldAcctStorage = await AcctStore.get(oldAcctEmail, storageIndexesToKeepOld as any);
+    const newAcctStorage = await AcctStore.get(newAcctEmail, storageIndexesToKeepNew as any);
+    await AcctStore.set(newAcctEmail, oldAcctStorage); // save 'fallback' and 'keep' values
+    await AcctStore.set(newAcctEmail, newAcctStorage); // save 'forget' and overwrite 'fallback'
     for (const sessionStorageIndex of Object.keys(sessionStorage)) {
       if (sessionStorageIndex.indexOf(oldAcctEmailIndexPrefix) === 0) {
         const v = sessionStorage.getItem(sessionStorageIndex);
@@ -140,11 +159,17 @@ export class Settings {
         sessionStorage.removeItem(sessionStorageIndex);
       }
     }
-    for (const ki of destAccountPrivateKeys) {
-      await KeyStore.add(newAcctEmail, ki.private);
+    for (const ki of newAccountPrivateKeys) {
+      await KeyStore.add(newAcctEmail, ki.private); // merge kept keys with newAccountPrivateKeys
     }
-    for (const fingerprint of Object.keys(destAcctPassPhrases)) {
-      await PassphraseStore.set('local', newAcctEmail, fingerprint, destAcctPassPhrases[fingerprint]);
+    const newRules = await OrgRules.newInstance(newAcctEmail);
+    if (!newRules.forbidStoringPassPhrase()) {
+      for (const fingerprint of Object.keys(oldAcctPassPhrases)) {
+        await PassphraseStore.set('local', newAcctEmail, fingerprint, oldAcctPassPhrases[fingerprint]);
+      }
+      for (const fingerprint of Object.keys(newAcctPassPhrases)) {
+        await PassphraseStore.set('local', newAcctEmail, fingerprint, newAcctPassPhrases[fingerprint]);
+      }
     }
     await Settings.acctStorageReset(oldAcctEmail);
     await GlobalStore.acctEmailsRemove(oldAcctEmail);
@@ -351,6 +376,65 @@ export class Settings {
     } else {
       await Ui.modal.warning(`Could not log in:\n${authRes.error || authRes.result}`);
     }
+  }
+
+  public static resetAccount = async (acctEmail: string): Promise<boolean> => {
+    if (await Ui.modal.confirm(Lang.setup.confirmResetAcct(acctEmail))) {
+      await Settings.collectInfoAndDownloadBackupFile(acctEmail);
+      if (await Ui.modal.confirm('Proceed to reset? Don\'t come back telling me I didn\'t warn you.')) {
+        await Settings.acctStorageReset(acctEmail);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  public static collectInfoAndDownloadBackupFile = async (acctEmail: string) => {
+    const name = `FlowCrypt_BACKUP_FILE_${acctEmail.replace(/[^a-z0-9]+/, '')}.txt`;
+    const backupText = await Settings.collectInfoForAccountBackup(acctEmail);
+    Browser.saveToDownloads(new Attachment({ name, type: 'text/plain', data: Buf.fromUtfStr(backupText) }));
+    await Ui.delay(1000);
+  }
+
+  /**
+    * determines how to treat old values when changing account
+    */
+  private static getOverwriteMode = (key: string): 'fallback' | 'forget' | 'keep' => {
+    if (key.startsWith('google_token_') || ['uuid', 'rules', 'openid', 'full_name', 'picture', 'sendAs'].includes(key)) { // old value should be used if only a new value is missing
+      return 'fallback';
+    } else if (key.startsWith('passphrase_')) { // force forgetting older values
+      return 'forget';
+    } else { // keep old values if any, 'keys' will later be merged with whatever is in the new account
+      return 'keep';
+    }
+  }
+
+  private static collectInfoForAccountBackup = async (acctEmail: string) => {
+    const text = [
+      'This file contains sensitive information, please put it in a safe place.',
+      '',
+      'DO NOT DISPOSE OF THIS FILE UNLESS YOU KNOW WHAT YOU ARE DOING',
+      '',
+      'NOTE DOWN YOUR PASS PHRASE IN A SAFE PLACE THAT YOU CAN FIND LATER',
+      '',
+      'If this key was registered on a keyserver (typically they are), you will need this same key (and pass phrase!) to replace it.',
+      'In other words, losing this key or pass phrase may cause people to have trouble writing you encrypted emails, even if you use another key (on FlowCrypt or elsewhere) later on!',
+      '',
+      'acctEmail: ' + acctEmail,
+    ];
+    const globalStorage = await GlobalStore.get(['version']);
+    const acctStorage = await AcctStore.get(acctEmail, ['setup_date', 'full_name']);
+    text.push('global_storage: ' + JSON.stringify(globalStorage));
+    text.push('account_storage: ' + JSON.stringify(acctStorage));
+    text.push('');
+    const keyinfos = await KeyStore.get(acctEmail);
+    for (const keyinfo of keyinfos) {
+      text.push('');
+      text.push('key_longid: ' + keyinfo.longid);
+      text.push(keyinfo.private);
+    }
+    text.push('');
+    return text.join('\n');
   }
 
   private static prepareNewSettingsLocationUrl = (acctEmail: string | undefined, parentTabId: string, page: string, addUrlTextOrParams?: string | UrlParams): string => {

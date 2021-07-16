@@ -5,7 +5,7 @@
 import { ApiErr } from '../api/shared/api-error.js';
 import { Catch } from '../platform/catch.js';
 import { Dict, Url } from '../core/common.js';
-import Swal from 'sweetalert2';
+import Swal, { SweetAlertResult } from 'sweetalert2';
 import { Xss } from '../platform/xss.js';
 
 type NamedSels = Dict<JQuery<HTMLElement>>;
@@ -136,9 +136,10 @@ export class Ui {
   };
 
   public static modal = {
-    info: async (text: string): Promise<void> => {
+    info: async (text: string, isHTML: boolean = false): Promise<void> => {
+      text = isHTML ? Xss.htmlSanitize(text) : Xss.escape(text).replace(/\n/g, '<br>');
       await Ui.swal().fire({
-        html: Xss.escape(text).replace(/\n/g, '<br>'),
+        html: text,
         allowOutsideClick: false,
         customClass: {
           popup: 'ui-modal-info',
@@ -240,10 +241,12 @@ export class Ui {
       });
       Ui.activateModalPageLinkTags(); // in case the page itself has data-swal-page links
     },
-    iframe: async (iframeUrl: string, iframeWidth: number, iframeHeight: number): Promise<void> => {
-      await Ui.swal().fire({
+    iframe: async (iframeUrl: string, iframeHeight?: number, dataTest?: string): Promise<SweetAlertResult> => {
+      const iframeWidth = Math.min(800, $('body').width()! - 200);
+      iframeHeight = iframeHeight || $('body').height()! - ($('body').height()! > 800 ? 150 : 75);
+      return await Ui.swal().fire({
         didOpen: () => {
-          $(Swal.getContent()!).attr('data-test', 'dialog');
+          $(Swal.getPopup()!).attr('data-test', dataTest || 'dialog');
           $(Swal.getCloseButton()!).attr('data-test', 'dialog-close').blur();
         },
         willClose: () => {
@@ -265,7 +268,7 @@ export class Ui {
     fullscreen: async (html: string): Promise<void> => {
       await Ui.swal().fire({
         didOpen: () => {
-          $(Swal.getContent()!).attr('data-test', 'dialog');
+          $(Swal.getPopup()!).attr('data-test', 'dialog');
         },
         html: Xss.htmlSanitize(html),
         grow: 'fullscreen',
@@ -278,7 +281,7 @@ export class Ui {
     attachmentPreview: async (iframeUrl: string): Promise<void> => {
       await Ui.swal().fire({
         didOpen: () => {
-          $(Swal.getContent()!).attr('data-test', 'attachment-dialog');
+          $(Swal.getPopup()!).attr('data-test', 'attachment-dialog');
           $(Swal.getCloseButton()!).attr('data-test', 'dialog-close');
         },
         html: `<iframe src="${Xss.escape(iframeUrl)}" style="border: 0" sandbox="allow-scripts allow-same-origin allow-downloads"></iframe>`,
@@ -338,7 +341,7 @@ export class Ui {
         <div class="line">&nbsp;</div>
         <div class="line">Email human@flowcrypt.com if you need assistance.</div>
       `);
-      const overlay = $(Swal.getContent()!);
+      const overlay = $(Swal.getHtmlContainer()!);
       overlay.find('.action-show-overlay-details').one('click', Ui.event.handle(target => {
         $(target).hide().siblings('pre').show();
       }));

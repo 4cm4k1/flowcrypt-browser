@@ -6,7 +6,6 @@ import { Buf } from '../../js/common/core/buf.js';
 import { KeyUtil } from '../../js/common/core/crypto/key.js';
 import { AttachmentUI } from '../../js/common/ui/attachment-ui.js';
 import { ApiErr } from '../../js/common/api/shared/api-error.js';
-import { WellKnownHostMeta } from '../../js/common/api/account-servers/well-known-host-meta.js';
 import { Mime } from '../../js/common/core/mime.js';
 import { Attachment } from '../../js/common/core/attachment.js';
 import { Wkd } from '../../js/common/api/key-server/wkd.js';
@@ -15,13 +14,14 @@ import { Sks } from '../../js/common/api/key-server/sks.js';
 import { Ui } from '../../js/common/browser/ui.js';
 import { ContactStore } from '../../js/common/platform/store/contact-store.js';
 import { Debug } from '../../js/common/platform/debug.js';
+import { Catch } from '../../js/common/platform/catch.js';
+import * as forge from 'node-forge';
 
 /**
  * importing all libs that are tested in ci tests
  * add lib name below, let the IDE resolve the actual import
  */
 const libs: any[] = [
-  WellKnownHostMeta,
   ApiErr,
   Attachment,
   AttachmentUI,
@@ -33,10 +33,12 @@ const libs: any[] = [
   MsgUtil,
   Ui,
   ContactStore,
-  Debug
+  Debug,
+  Catch
 ];
 
 // add them to global scope so ci can use them
 for (const lib of libs) {
   (window as any)[(lib as any).name] = lib;
 }
+(window as any).forge = forge;

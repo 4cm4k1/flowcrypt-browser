@@ -8,7 +8,7 @@ import { KeyAlgo } from './core/crypto/key.js';
 
 type DomainRules$flag = 'NO_PRV_CREATE' | 'NO_PRV_BACKUP' | 'PRV_AUTOIMPORT_OR_AUTOGEN' | 'PASS_PHRASE_QUIET_AUTOGEN' |
   'ENFORCE_ATTESTER_SUBMIT' | 'NO_ATTESTER_SUBMIT' | 'NO_KEY_MANAGER_PUB_LOOKUP' | 'USE_LEGACY_ATTESTER_SUBMIT' |
-  'DEFAULT_REMEMBER_PASS_PHRASE' | 'HIDE_ARMOR_META';
+  'DEFAULT_REMEMBER_PASS_PHRASE' | 'HIDE_ARMOR_META' | 'FORBID_STORING_PASS_PHRASE';
 
 export type DomainRulesJson = {
   flags?: DomainRules$flag[],
@@ -34,15 +34,6 @@ export class OrgRules {
     }
     const storage = await AcctStore.get(email, ['rules']);
     return new OrgRules(storage.rules || OrgRules.default, Str.getDomainFromEmailAddress(acctEmail));
-  }
-
-  public static isPublicEmailProviderDomain = (emailAddrOrDomain: string) => {
-    if (emailAddrOrDomain.endsWith('.flowcrypt.com') || emailAddrOrDomain.endsWith('flowcrypt.dev')) {
-      // this is here for easier testing. helps our mock tests which run on flowcrypt.com subdomains
-      // marking it this way prevents calling FES which is not there, on enterprise builds where FES is required
-      return true;
-    }
-    return ['gmail.com', 'yahoo.com', 'outlook.com', 'live.com'].includes(emailAddrOrDomain.split('@').pop() || 'NONE');
   }
 
   protected constructor(
@@ -136,6 +127,10 @@ export class OrgRules {
     return (this.domainRules.flags || []).includes('DEFAULT_REMEMBER_PASS_PHRASE') || this.mustAutogenPassPhraseQuietly();
   }
 
+  public forbidStoringPassPhrase = (): boolean => {
+    return (this.domainRules.flags || []).includes('FORBID_STORING_PASS_PHRASE');
+  }
+
   /**
    * This is to be used for customers who run their own FlowCrypt Email Key Manager
    * If a key can be found on FEKM, it will be auto imported
@@ -158,7 +153,11 @@ export class OrgRules {
    * This creates the smoothest user experience, for organisations that use full-disk-encryption and don't need pass phrase protection
    */
   public mustAutogenPassPhraseQuietly = (): boolean => {
-    return (this.domainRules.flags || []).includes('PASS_PHRASE_QUIET_AUTOGEN');
+    return this.usesKeyManager() && (this.domainRules.flags || []).includes('PASS_PHRASE_QUIET_AUTOGEN');
+  }
+
+  public userMustChoosePassPhraseDuringPrvAutoimport = (): boolean => {
+    return this.usesKeyManager() && !this.mustAutogenPassPhraseQuietly();
   }
 
   /**
@@ -173,7 +172,23 @@ export class OrgRules {
    * This is because they already have other means to obtain public keys for these domains, such as from their own internal keyserver
    */
   public canLookupThisRecipientOnAttester = (emailAddr: string): boolean => {
-    return !(this.domainRules.disallow_attester_search_for_domains || []).includes(Str.getDomainFromEmailAddress(emailAddr) || 'NONE');
+    if (this.disallowLookupOnAttester()) {
+      return false;
+    }
+    const disallowedDomains = this.domainRules.disallow_attester_search_for_domains || [];
+    const userDomain = Str.getDomainFromEmailAddress(emailAddr);
+    if (!userDomain) {
+      throw new Error(`Not a valid email ${emailAddr}`);
+    }
+    return !disallowedDomains.includes(userDomain);
+  }
+
+  /**
+   *
+   * Some orgs might want to disallow lookup on attester completely
+   */
+  public disallowLookupOnAttester = (): boolean => {
+    return (this.domainRules.disallow_attester_search_for_domains || []).includes('*');
   }
 
   /**
