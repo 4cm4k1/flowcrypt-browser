@@ -9,7 +9,7 @@
     "@openpgp/web-stream-tools": "^0.1.3",
     "@types/chai": "4.3.19",
     "@types/chai-as-promised": "7.1.8",
-    "@types/chrome": "0.1.4",
+    "@types/chrome": "0.1.6",
     "@types/fs-extra": "^11.0.4",
     "@types/jquery": "3.5.33",
     "@types/mailparser": "3.4.6",
@@ -20,7 +20,7 @@
     "eslint": "9.34.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-header": "^3.1.1",
-    "eslint-plugin-jsdoc": "^54.1.1",
+    "eslint-plugin-jsdoc": "^54.3.1",
     "eslint-plugin-local-rules": "^3.0.2",
     "eslint-plugin-no-null": "^1.0.2",
     "eslint-plugin-no-only-tests": "3.3.0",
@@ -60,7 +60,7 @@
     "node-forge": "1.3.1",
     "postcss-html": "^1.8.0",
     "squire-rte": "2.3.5",
-    "sweetalert2": "11.22.5",
+    "sweetalert2": "11.23.0",
     "tap-xunit": "^2.4.1"
   },
   "scripts": {
